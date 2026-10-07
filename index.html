@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'; connect-src 'self' https://api.open-meteo.com; frame-src https://calendar.google.com; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<title>新しいタブ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div class="page">
+  <div class="blob blob-pink" aria-hidden="true"></div>
+  <div class="blob blob-yellow" aria-hidden="true"></div>
+  <div class="blob blob-mint" aria-hidden="true"></div>
+
+  <main class="container">
+    <header class="top">
+      <div class="org-pill">
+        <svg width="28" height="28" viewBox="0 0 28 28" aria-hidden="true"><path d="M4 14 L14 5 L24 14 L24 24 L4 24 Z" fill="#FCE2DA" stroke="#2F2B28" stroke-width="2" stroke-linejoin="round"/><rect x="11" y="16" width="6" height="8" rx="2" fill="#FFFFFF" stroke="#2F2B28" stroke-width="2"/></svg>
+        <span id="org-name" class="org-name"></span>
+      </div>
+      <p class="tagline">今日もいい一日を。</p>
+    </header>
+
+    <section class="hero">
+      <div class="hero-text">
+        <p id="greeting-en" class="eyebrow" lang="en">Hello</p>
+        <h1 id="greeting" class="greeting">こんにちは</h1>
+        <p class="clock"><time id="time">--:--</time></p>
+        <p id="date" class="date"></p>
+        <div id="weather" class="weather-pill" aria-live="polite">
+          <span class="weather-text"><span class="weather-city">天気</span><span class="weather-main">読み込み中…</span></span>
+        </div>
+      </div>
+
+      <div class="hero-art">
+        <div class="art-blob">
+          <svg viewBox="0 0 320 300" role="img" aria-label="マグカップを持ってひと息つく人のイラスト">
+            <circle cx="66" cy="70" r="22" fill="#FBD763" stroke="#2F2B28" stroke-width="3"/>
+            <path d="M96 70 H104 M87.2 91.2 L92.9 96.9 M66 100 V108 M44.8 91.2 L39.1 96.9 M36 70 H28 M44.8 48.8 L39.1 43.1 M66 40 V32 M87.2 48.8 L92.9 43.1" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+            <path d="M104 170 C106 146 128 134 160 134 C192 134 214 146 216 170 L224 262 L96 262 Z" fill="#F6C945" stroke="#2F2B28" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M144 137 Q160 152 176 137" fill="none" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+            <path d="M114 172 C104 198 118 216 140 214" fill="none" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+            <path d="M206 172 C216 198 204 216 184 216" fill="none" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+            <path d="M154 178 C148 170 160 164 154 154 M168 178 C162 170 174 164 168 154" fill="none" stroke="#2F2B28" stroke-width="2.5" stroke-linecap="round" opacity=".6"/>
+            <rect x="144" y="186" width="34" height="38" rx="6" fill="#FFFFFF"/>
+            <rect x="144" y="198" width="34" height="10" fill="#EE8A7E"/>
+            <rect x="144" y="186" width="34" height="38" rx="6" fill="none" stroke="#2F2B28" stroke-width="3"/>
+            <path d="M178 196 C190 196 190 214 178 214" fill="none" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+            <ellipse cx="140" cy="211" rx="9" ry="8" fill="#FFFFFF" stroke="#2F2B28" stroke-width="3"/>
+            <ellipse cx="184" cy="215" rx="9" ry="8" fill="#FFFFFF" stroke="#2F2B28" stroke-width="3"/>
+            <circle cx="160" cy="92" r="40" fill="#FFFFFF" stroke="#2F2B28" stroke-width="3"/>
+            <path d="M120 94 C116 60 138 50 162 50 C190 50 206 66 200 94 C192 80 178 72 160 74 C144 76 130 82 120 94 Z" fill="#4A4542" stroke="#2F2B28" stroke-width="3" stroke-linejoin="round"/>
+            <circle cx="148" cy="100" r="3.4" fill="#2F2B28"/>
+            <circle cx="174" cy="100" r="3.4" fill="#2F2B28"/>
+            <circle cx="139" cy="111" r="6" fill="#F4B6B0"/>
+            <circle cx="183" cy="111" r="6" fill="#F4B6B0"/>
+            <path d="M152 113 Q161 122 170 113" fill="none" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+            <path d="M236 226 L276 226 L270 262 L242 262 Z" fill="#EE8A7E" stroke="#2F2B28" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M256 226 C240 206 238 186 250 176 C262 190 262 208 256 226 Z" fill="#7CC36E" stroke="#2F2B28" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M256 226 C268 204 284 198 292 204 C286 220 272 228 256 226 Z" fill="#7CC36E" stroke="#2F2B28" stroke-width="3" stroke-linejoin="round"/>
+            <path d="M36 262 H288" stroke="#2F2B28" stroke-width="3" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+    </section>
+
+    <section class="links-section" aria-labelledby="links-title">
+      <div class="section-head">
+        <p class="eyebrow" lang="en">Shortcuts</p>
+        <h2 id="links-title" class="section-title">よく使うリンク</h2>
+      </div>
+      <div id="links" class="tiles"></div>
+    </section>
+
+    <section id="calendar" class="calendar-section" aria-labelledby="cal-title" hidden>
+      <div class="section-head">
+        <p class="eyebrow" lang="en">Schedule</p>
+        <h2 id="cal-title" class="section-title">みんなの予定</h2>
+      </div>
+      <div class="cal-frame"></div>
+    </section>
+  </main>
+
+  <footer class="hill">
+    <svg width="120" height="40" viewBox="0 0 120 40" aria-hidden="true"><path d="M20 38 C14 28 16 18 24 14 C30 22 28 32 20 38 Z" fill="#7CC36E" stroke="#2F2B28" stroke-width="2.5" stroke-linejoin="round"/><path d="M60 38 C52 26 56 12 64 8 C70 20 68 30 60 38 Z" fill="#F6C945" stroke="#2F2B28" stroke-width="2.5" stroke-linejoin="round"/><path d="M100 38 C94 28 96 18 104 14 C110 22 108 32 100 38 Z" fill="#EE8A7E" stroke="#2F2B28" stroke-width="2.5" stroke-linejoin="round"/></svg>
+    <p class="fine"><a href="https://open-meteo.com/" rel="noopener noreferrer" lang="en">Weather data by Open-Meteo.com</a></p>
+    <p id="org-footer" class="fine"></p>
+  </footer>
+</div>
+</body>
+</html>

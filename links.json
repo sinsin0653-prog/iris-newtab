@@ -1,0 +1,10 @@
+{
+  "links": [
+    { "title": "Google 検索", "url": "https://www.google.com/", "icon": "search" },
+    { "title": "YouTube", "url": "https://www.youtube.com/", "icon": "video" },
+    { "title": "Gmail", "url": "https://mail.google.com/", "icon": "mail" },
+    { "title": "カレンダー", "url": "https://calendar.google.com/", "icon": "calendar" },
+    { "title": "ドライブ", "url": "https://drive.google.com/", "icon": "folder" },
+    { "title": "マップ", "url": "https://www.google.com/maps", "icon": "map" }
+  ]
+}
