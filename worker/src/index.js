@@ -2,6 +2,8 @@
 import { planNudges } from './scheduler.js';
 import { verifyDiscordRequest, handleInteraction, DiscordRest } from './discord.js';
 import { withDefaults, mergeState, emptyState } from './state.js';
+import { nudgeStage } from './core.js';
+import { localParts } from './scheduler.js';
 
 const KEY = 'state';
 
@@ -27,7 +29,7 @@ function authorized(request, env) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(env) });
 
@@ -36,7 +38,9 @@ export default {
       if (!valid) return new Response('bad signature', { status: 401 });
       const interaction = JSON.parse(body);
       const state = await loadState(env);
-      const res = await handleInteraction(interaction, { state, now: new Date(), save: (s) => saveState(env, s) });
+      const events = [];
+      const res = await handleInteraction(interaction, { state, now: new Date(), save: (s) => saveState(env, s), events });
+      if (events.length) ctx.waitUntil(postGoodNews(env, state, events));
       return new Response(JSON.stringify(res), { headers: { 'Content-Type': 'application/json' } });
     }
 
@@ -46,8 +50,14 @@ export default {
       if (request.method === 'PUT') {
         let incoming;
         try { incoming = await request.json(); } catch { return json(env, { error: 'bad json' }, 400); }
-        const merged = mergeState(await loadState(env), incoming);
+        const before = await loadState(env);
+        const merged = mergeState(before, incoming);
         await saveState(env, merged);
+        // アプリ側で全部「かばんに入れた」になったら、良い知らせを見守りチャンネルへ
+        const lp = localParts(new Date(), merged.settings.tz);
+        const was = nudgeStage({ items: before.items, today: lp.dateKey, now: lp.local, leaveAt: before.settings.leaveAt });
+        const is = nudgeStage({ items: merged.items, today: lp.dateKey, now: lp.local, leaveAt: merged.settings.leaveAt });
+        if (was.stage !== 'clear' && is.stage === 'clear' && was.items.length) ctx.waitUntil(postGoodNews(env, merged, [{ type: 'packed_all', text: `ぜんぶ入れた（${String(lp.h).padStart(2, '0')}:${String(lp.mi).padStart(2, '0')}）。いってらっしゃい！` }]));
         return json(env, merged);
       }
     }
@@ -76,15 +86,28 @@ export default {
     if (!actions.length) return;
     const userId = next.settings.discord.userId;
     const watch = next.settings.discord.watchChannelId;
+    const w = next.settings.watch || {};
     const rest = new DiscordRest(env.DISCORD_TOKEN);
     for (const a of actions) {
       try {
+        if (a.toChannel) { if (watch) await rest.send(watch, a.payload); continue; }
         if (userId) await rest.dm(userId, a.payload);
-        // 見守りチャンネル：出発後 3 回目以降だけ
-        if (watch && /:late[3-5]$/.test(a.slot)) await rest.send(watch, { ...a.payload, components: [] });
+        // 見守りチャンネル：本人が選んだものだけ。既定は良い知らせだけなので、ここに来るのは夜のまとめと出発後の催促を選んだとき
+        if (watch && a.kind === 'evening' && w.evening) await rest.send(watch, { ...a.payload, components: [], content: a.payload.embeds[0].title });
+        if (watch && w.late && /:late[3-5]$/.test(a.slot)) await rest.send(watch, { ...a.payload, components: [] });
       } catch (e) {
         console.error('send failed', a.slot, String(e.message || e));
       }
     }
   }
 };
+
+/** 良い知らせ（ぜんぶ入れた、出した）を見守りチャンネルへ。本人が watch.good を切っていれば送らない。 */
+async function postGoodNews(env, state, events) {
+  const watch = state.settings.discord.watchChannelId;
+  if (!watch || !(state.settings.watch || {}).good) return;
+  const rest = new DiscordRest(env.DISCORD_TOKEN);
+  for (const ev of events) {
+    try { await rest.send(watch, { content: ev.text, allowed_mentions: { users: [] } }); } catch (e) { console.error('good news failed', String(e.message || e)); }
+  }
+}

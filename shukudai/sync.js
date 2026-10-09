@@ -12,7 +12,7 @@ export async function pushState(sync, state) {
   const res = await fetch(`${sync.url.replace(/\/$/, '')}/api/state`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${sync.token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ items: state.items, settings, capture: state.capture || {} })
+    body: JSON.stringify({ items: state.items, settings, capture: state.capture || {}, nudge: { snoozeUntil: (state.nudge || {}).snoozeUntil || null, snoozeCount: (state.nudge || {}).snoozeCount || {} } })
   });
   if (!res.ok) throw new Error(`push ${res.status}`);
   return res.json();
@@ -37,8 +37,16 @@ export function mergeItems(a = [], b = []) {
 }
 
 /** 「答えた」は負けない：どちらかが none / added なら残す。added は none より強い。 */
+function normCapture(v) {
+  if (v === 'none' || v === 'added') return { '*': v };
+  return v && typeof v === 'object' ? { ...v } : {};
+}
 export function mergeCapture(a = {}, b = {}) {
-  const out = { ...(a || {}) };
-  for (const [k, v] of Object.entries(b || {})) if (v === 'added' || (v === 'none' && out[k] !== 'added')) out[k] = v;
+  const out = {};
+  for (const k of new Set([...Object.keys(a || {}), ...Object.keys(b || {})])) {
+    const merged = normCapture((a || {})[k]);
+    for (const [sub, v] of Object.entries(normCapture((b || {})[k]))) if (v === 'added' || (v === 'none' && merged[sub] !== 'added')) merged[sub] = v;
+    if (Object.keys(merged).length) out[k] = merged;
+  }
   return out;
 }

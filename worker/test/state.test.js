@@ -19,3 +19,14 @@ test('settings take the newer copy and nudge stays server-side', () => {
   assert.equal(m.settings.tz, 'Asia/Tokyo');
   assert.deepEqual(m.nudge.sent, { x: 1 });
 });
+
+test('capture merges per subject and upgrades old string entries; client snooze is merged', async () => {
+  const { mergeCapture, mergeNudge } = await import('../src/state.js');
+  const m = mergeCapture({ '2026-10-09': 'none', '2026-10-08': { '数学': 'added' } }, { '2026-10-09': { '英語': 'added' }, '2026-10-08': { '数学': 'none', '英語': 'none' } });
+  assert.deepEqual(m['2026-10-09'], { '*': 'none', '英語': 'added' });
+  assert.deepEqual(m['2026-10-08'], { '数学': 'added', '英語': 'none' });
+  const n = mergeNudge({ sent: { a: 1 }, snoozeUntil: '2026-10-09T00:00:00Z', snoozeCount: { '2026-10-09': 1 } }, { snoozeUntil: '2026-10-09T00:10:00Z', snoozeCount: { '2026-10-09': 2 }, sent: {} });
+  assert.deepEqual(n.sent, { a: 1 });
+  assert.equal(n.snoozeUntil, '2026-10-09T00:10:00Z');
+  assert.equal(n.snoozeCount['2026-10-09'], 2);
+});

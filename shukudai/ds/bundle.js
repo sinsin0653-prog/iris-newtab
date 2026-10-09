@@ -103,11 +103,32 @@
     return (d.getMonth() + 1) + '月' + d.getDate() + '日 ' + WEEKDAYS[d.getDay()] + '曜日';
   }
 
-  /** 期限の状態。色・言葉・アイコンの 3 点セットの元。 */
-  function dueInfo(due, today, done) {
+  /** 日付キー（YYYY-MM-DD）。createdOn / packedOn の比較に使う。 */
+  function dayKey(v) { return toISO(parseDate(v || new Date())); }
+  /** その日に「かばんに入れた」か。packedOn（その日の日付キー）で見る。古い記録（packedOn なし）は当日扱い。 */
+  function isPackedToday(item, today) {
+    if (!item || !item.packed) return false;
+    if (!item.packedOn) return true;
+    return item.packedOn === dayKey(today);
+  }
+  /** 出した／先生に言った／消した、はもう追わない。 */
+  function isActive(item) { return !!item && !item.deleted && !item.submitted && !item.dropped; }
+  /** 紙を持っていく宿題ではなく、ネットで出すもの。朝のかばん確認から外す。 */
+  function isOnline(item) {
+    if (!item) return false;
+    if (item.location === 'online') return true;
+    return /classroom|クラスルーム|タブレット|オンライン|google|ロイロ|teams|forms|提出フォーム|ネット/i.test(item.where || '');
+  }
+
+  /** 期限の状態。色・言葉・アイコンの 3 点セットの元。flags: { packed, submitted, dropped } */
+  function dueInfo(due, today, done, flags) {
+    flags = flags || {};
     var t = parseDate(today || new Date());
     var d = parseDate(due);
     var days = Math.round((d - t) / DAY_MS);
+    if (flags.submitted) return { state: 'submitted', label: '出した', days: days, icon: 'check', date: formatDate(d), spoken: '出した' };
+    if (flags.dropped) return { state: 'dropped', label: '先生に言った', days: days, icon: 'check', date: formatDate(d), spoken: '先生に言った' };
+    if (days < 0 && (flags.packed || done)) return { state: 'handin', label: '出した？', days: days, icon: 'bag', date: formatDate(d), spoken: '期限 ' + formatDateSpoken(d) + '、出した？' };
     if (done) return { state: 'done', label: 'できた', days: days, icon: 'check', date: formatDate(d), spoken: 'できた' };
     var label, state;
     if (days < 0) { state = 'overdue'; label = (-days) + '日すぎた'; }
@@ -123,7 +144,7 @@
   /** 期限チップ。props: { due, today?, done?, size?: 'md'|'lg', showDate? } */
   function DueChip(props) {
     props = props || {};
-    var info = dueInfo(props.due, props.today, props.done);
+    var info = dueInfo(props.due, props.today, props.done, props.flags);
     var chip = el('span', {
       className: 'sk-chip sk-chip--' + info.state + (props.size === 'lg' ? ' sk-chip--lg' : ''),
       role: 'img',
@@ -152,12 +173,13 @@
     }, props.icon ? icon(props.icon, 24) : null, el('span', { className: 'sk-btn__label', text: props.label || '' }));
   }
 
-  /** 宿題カード。props: { item, today?, onDone(item, done), onOpen?(item) } */
+  /** 宿題カード。props: { item, today?, onDone(item, done), onOpen?(item), onSubmit?(item), onDrop?(item) } */
   function HomeworkCard(props) {
     props = props || {};
     var item = props.item || {};
-    var info = dueInfo(item.due, props.today, item.done);
-    var card = el('article', { className: 'sk-card sk-card--' + info.state + (item.done ? ' is-done' : '') });
+    var flags = { packed: item.packed, submitted: item.submitted, dropped: item.dropped };
+    var info = dueInfo(item.due, props.today, item.done, flags);
+    var card = el('article', { className: 'sk-card sk-card--' + info.state + (item.done ? ' is-done' : '') + (info.state === 'submitted' || info.state === 'dropped' ? ' is-closed' : '') });
 
     var check = el('button', {
       className: 'sk-card__check',
@@ -168,14 +190,14 @@
     check.addEventListener('click', function () {
       var next = !item.done;
       item.done = next;
-      card.className = 'sk-card sk-card--' + dueInfo(item.due, props.today, next).state + (next ? ' is-done' : '');
+      card.className = 'sk-card sk-card--' + dueInfo(item.due, props.today, next, flags).state + (next ? ' is-done' : '');
       check.setAttribute('aria-pressed', next ? 'true' : 'false');
       check.setAttribute('aria-label', next ? 'もどす（まだにする）' : 'できた にする');
       if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         check.classList.remove('is-pop'); void check.offsetWidth; check.classList.add('is-pop');
       }
       var old = card.querySelector('.sk-chip');
-      if (old) old.replaceWith(DueChip({ due: item.due, today: props.today, done: next }));
+      if (old) old.replaceWith(DueChip({ due: item.due, today: props.today, done: next, flags: flags }));
       if (props.onDone) props.onDone(item, next);
     });
 
@@ -188,14 +210,23 @@
       type: props.onOpen ? 'button' : null,
       onClick: props.onOpen ? function () { props.onOpen(item); } : null
     },
-      el('div', { className: 'sk-card__meta' }, SubjectTag({ subject: item.subject }), DueChip({ due: item.due, today: props.today, done: item.done })),
-      el('h3', { className: 'sk-card__range', text: item.range || '（範囲が書いてない）' }),
+      el('div', { className: 'sk-card__meta' }, SubjectTag({ subject: item.subject }), DueChip({ due: item.due, today: props.today, done: item.done, flags: flags })),
+      el('h3', { className: 'sk-card__range' + (item.range ? '' : ' is-missing'), text: item.range || '範囲？まだ書いてない' }),
       where,
+      item.location === 'school' && !isPackedToday(item, props.today) ? el('p', { className: 'sk-card__submit', text: '学校にある。帰る前にかばんへ。' }) : null,
       item.submitTo ? el('p', { className: 'sk-card__submit', text: '出すところ：' + item.submitTo }) : null
     );
 
     card.appendChild(check);
     card.appendChild(body);
+    // 期限が来たら「出した」を聞く。期限切れには出口（先生に言った）も
+    if ((info.state === 'handin' || info.state === 'overdue') && (props.onSubmit || props.onDrop)) {
+      var actions = el('div', { className: 'sk-card__actions' },
+        props.onSubmit ? BigButton({ label: '出した', kind: 'secondary', icon: 'check', onClick: function () { props.onSubmit(item); } }) : null,
+        props.onDrop ? BigButton({ label: '先生に言った', kind: 'ghost', onClick: function () { props.onDrop(item); } }) : null
+      );
+      body.appendChild(actions);
+    }
     return card;
   }
 
@@ -204,12 +235,12 @@
     props = props || {};
     var item = props.item;
     if (!item) return AllDone({ onAdd: props.onAdd });
-    var info = dueInfo(item.due, props.today, item.done);
+    var info = dueInfo(item.due, props.today, item.done, { packed: item.packed, submitted: item.submitted, dropped: item.dropped });
     var remaining = props.remaining || 0;
     var hero = el('section', { className: 'sk-hero sk-hero--' + info.state, 'aria-labelledby': 'sk-hero-range' },
       el('p', { className: 'sk-hero__eyebrow', text: info.state === 'overdue' ? 'まずこれ。やりかけでも持っていこう' : 'いま、いちばん近いのはこれ' }),
-      DueChip({ due: item.due, today: props.today, done: item.done, size: 'lg', showDate: true }),
-      el('h2', { className: 'sk-hero__range', id: 'sk-hero-range', text: item.range || '（範囲が書いてない）' }),
+      DueChip({ due: item.due, today: props.today, done: item.done, size: 'lg', showDate: true, flags: { packed: item.packed, submitted: item.submitted, dropped: item.dropped } }),
+      el('h2', { className: 'sk-hero__range' + (item.range ? '' : ' is-missing'), id: 'sk-hero-range', text: item.range || '範囲？まだ書いてない' }),
       el('div', { className: 'sk-hero__meta' },
         SubjectTag({ subject: item.subject, size: 'lg' }),
         el('span', { className: 'sk-hero__where' + (item.where ? '' : ' is-missing') }, icon('pin', 22), el('span', { text: item.where || 'どこにある？まだ書いてない' }))
@@ -221,13 +252,34 @@
   }
 
   var WHERE_PRESETS = ['教科書', 'ノート', 'プリント', 'ワーク', 'Classroom', 'タブレット'];
+  var LOCATION_PRESETS = [{ key: 'bag', label: 'かばん' }, { key: 'school', label: '学校（机・ロッカー）' }, { key: 'home', label: '家' }, { key: 'online', label: 'ネット' }];
 
-  /** さっと登録。props: { today?, subjects?, initial?, onSubmit(item), onCancel? } */
+  /** 次に学校がある日（きょうは含まない）。schoolDays は曜日の配列（0=日）。 */
+  function nextSchoolDay(today, schoolDays) {
+    var t = parseDate(today || new Date());
+    var days = Array.isArray(schoolDays) && schoolDays.length ? schoolDays : [1, 2, 3, 4, 5];
+    for (var k = 1; k <= 14; k++) { var d = addDays(t, k); if (days.indexOf(d.getDay()) >= 0) return d; }
+    return addDays(t, 1);
+  }
+  /** 次にその科目の授業がある日。時間割になければ次の学校の日。 */
+  function nextLesson(subject, today, timetable, schoolDays) {
+    var t = parseDate(today || new Date());
+    var tt = timetable || {};
+    for (var k = 1; k <= 14; k++) {
+      var d = addDays(t, k);
+      var list = tt[String(d.getDay())];
+      if (Array.isArray(list) && list.indexOf(subject) >= 0) return { date: d, lesson: true };
+    }
+    return { date: nextSchoolDay(t, schoolDays), lesson: false };
+  }
+
+  /** さっと登録。props: { today?, subjects?, timetable?, schoolDays?, paperSpot?, allowEmptyRange?, initial?, onSubmit(item), onCancel?(draft) } */
   function QuickAdd(props) {
     props = props || {};
     var today = parseDate(props.today || new Date());
     var subjects = props.subjects || SUBJECTS.map(function (s) { return s.label; });
-    var state = { subject: (props.initial && props.initial.subject) || null, where: [], due: null };
+    var init = props.initial || {};
+    var state = { subject: init.subject || null, where: Array.isArray(init.whereList) ? init.whereList.slice() : [], due: init.due || null, location: init.location || null, dueChoice: null };
 
     function choiceGroup(legendText, options, multi, onPick) {
       var group = el('div', { className: 'sk-choices', role: multi ? 'group' : 'radiogroup', 'aria-label': legendText });
@@ -250,30 +302,60 @@
       return group;
     }
 
-    var rangeInput = el('input', { className: 'sk-input', type: 'text', id: 'sk-range', name: 'range', autocomplete: 'off', enterkeyhint: 'done', placeholder: 'p.24〜27 ／ プリント1枚 ／ ワーク §3', value: (props.initial && props.initial.range) || '' });
+    var rangeInput = el('input', { className: 'sk-input', type: 'text', id: 'sk-range', name: 'range', autocomplete: 'off', enterkeyhint: 'done', placeholder: 'p.24〜27 ／ プリント1枚 ／ ワーク §3', value: init.range || '' });
     var rangeHint = el('p', { className: 'sk-hint', id: 'sk-range-hint', 'aria-live': 'polite' });
     rangeInput.setAttribute('aria-describedby', 'sk-range-hint');
 
-    var whereOther = el('input', { className: 'sk-input sk-input--sub', type: 'text', name: 'whereOther', placeholder: 'ほかの場所（ロッカー、先生の机…）', autocomplete: 'off' });
+    var whereOther = el('input', { className: 'sk-input sk-input--sub', type: 'text', name: 'whereOther', placeholder: 'ほかの場所（ロッカー、先生の机…）', autocomplete: 'off', value: init.whereOther || '' });
+    var paperHint = el('p', { className: 'sk-hint sk-hint--calm', 'aria-live': 'polite' });
+    function updatePaperHint() {
+      paperHint.textContent = (props.paperSpot && state.where.indexOf('プリント') >= 0) ? '家に着いたら、プリントは「' + props.paperSpot + '」へ。' : '';
+    }
     var dateInput = el('input', { className: 'sk-input sk-input--sub', type: 'date', name: 'dueDate', min: toISO(today), hidden: true, 'aria-label': '日付をえらぶ' });
     dateInput.addEventListener('input', function () { state.due = dateInput.value || null; });
 
     var nextWeek = addDays(today, 7);
-    var dueOptions = [
-      { label: 'あした', value: toISO(addDays(today, 1)) },
-      { label: 'あさって', value: toISO(addDays(today, 2)) },
-      { label: '来週の' + WEEKDAYS[nextWeek.getDay()] + '曜', value: toISO(nextWeek) },
-      { label: '日付をえらぶ', value: 'pick' }
-    ];
+    // 既定は「次の○○の授業」。時間割がなければ「次の学校の日」。土曜に登録して日曜に鳴る、を防ぐ
+    function defaultDue() {
+      var n = state.subject ? nextLesson(state.subject, today, props.timetable, props.schoolDays) : { date: nextSchoolDay(today, props.schoolDays), lesson: false };
+      var d = n.date;
+      var label = (n.lesson ? '次の' + state.subject : '次の学校の日') + '（' + (d.getMonth() + 1) + '/' + d.getDate() + ' ' + WEEKDAYS[d.getDay()] + '）';
+      return { label: label, value: toISO(d) };
+    }
+    var dueGroup = null;
+    function buildDueOptions() {
+      var def = defaultDue();
+      var opts = [def];
+      var tomorrow = toISO(addDays(today, 1)), dayAfter = toISO(addDays(today, 2)), week = toISO(nextWeek);
+      if (tomorrow !== def.value) opts.push({ label: 'あした', value: tomorrow });
+      if (dayAfter !== def.value) opts.push({ label: 'あさって', value: dayAfter });
+      if (week !== def.value) opts.push({ label: '来週の' + WEEKDAYS[nextWeek.getDay()] + '曜', value: week });
+      opts.push({ label: '日付をえらぶ', value: 'pick' });
+      return opts;
+    }
+    function buildDueGroup() {
+      var g = choiceGroup('いつまで', buildDueOptions(), false, function (opt) {
+        state.dueChoice = opt.value;
+        if (opt.value === 'pick') { dateInput.hidden = false; dateInput.focus(); state.due = dateInput.value || null; }
+        else { dateInput.hidden = true; state.due = opt.value; }
+      });
+      return g;
+    }
 
     var form = el('form', { className: 'sk-quick', novalidate: true },
       el('div', { className: 'sk-quick__head' },
         el('h2', { className: 'sk-quick__title', text: 'さっと登録' }),
-        props.onCancel ? el('button', { className: 'sk-iconbtn', type: 'button', 'aria-label': 'とじる', onClick: props.onCancel }, icon('close', 24)) : null
+        props.onCancel ? el('button', { className: 'sk-iconbtn', type: 'button', 'aria-label': 'とじる', onClick: function () { props.onCancel(draft()); } }, icon('close', 24)) : null
       ),
       el('div', { className: 'sk-field' },
         el('p', { className: 'sk-field__label', text: '01 科目' }),
-        choiceGroup('科目', subjects.map(function (s) { return { label: s, value: s }; }), false, function (opt) { state.subject = opt.value; })
+        choiceGroup('科目', subjects.map(function (s) { return { label: s, value: s }; }), false, function (opt) {
+          state.subject = opt.value;
+          if (dueGroup && !state.dueChoice) {
+            var fresh = buildDueGroup();
+            dueGroup.replaceWith(fresh); dueGroup = fresh;
+          }
+        })
       ),
       el('div', { className: 'sk-field' },
         el('label', { className: 'sk-field__label', 'for': 'sk-range' }, icon('book', 20), el('span', { text: '02 範囲（ここだけ書く）' })),
@@ -284,28 +366,32 @@
         choiceGroup('どこにある', WHERE_PRESETS.map(function (w) { return { label: w, value: w }; }), true, function (opt, on) {
           var i = state.where.indexOf(opt.value);
           if (on && i < 0) state.where.push(opt.value); else if (!on && i >= 0) state.where.splice(i, 1);
+          if (opt.value === 'Classroom' || opt.value === 'タブレット') { if (on && !state.location) state.location = 'online'; }
+          updatePaperHint();
         }),
-        whereOther
+        whereOther,
+        paperHint,
+        el('p', { className: 'sk-field__sub', text: 'いま、どこ？' }),
+        choiceGroup('いまどこにある', LOCATION_PRESETS.map(function (l) { return { label: l.label, value: l.key }; }), false, function (opt) { state.location = opt.value; })
       ),
       el('div', { className: 'sk-field' },
         el('p', { className: 'sk-field__label' }, icon('clock', 20), el('span', { text: '04 いつまで？' })),
-        choiceGroup('いつまで', dueOptions, false, function (opt) {
-          if (opt.value === 'pick') { dateInput.hidden = false; dateInput.focus(); state.due = dateInput.value || null; }
-          else { dateInput.hidden = true; state.due = opt.value; }
-        }),
+        (function () { dueGroup = buildDueGroup(); return dueGroup; })(),
         dateInput
       ),
       el('div', { className: 'sk-quick__actions' },
         BigButton({ label: 'これで登録', kind: 'primary', icon: 'plus', full: true, type: 'submit' }),
-        props.onCancel ? BigButton({ label: 'あとで', kind: 'ghost', full: true, onClick: props.onCancel }) : null
+        props.onCancel ? BigButton({ label: 'あとで（書きかけはとっておく）', kind: 'ghost', full: true, onClick: function () { props.onCancel(draft()); } }) : null
       )
     );
 
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
+    function draft() {
+      return { subject: state.subject, range: rangeInput.value, whereList: state.where.slice(), whereOther: whereOther.value, due: state.due, location: state.location };
+    }
+    function submit(allowEmpty) {
       var range = rangeInput.value.trim();
-      if (!range) {
-        rangeHint.textContent = '範囲だけは書いて！（例：p.24〜27）';
+      if (!range && !allowEmpty) {
+        rangeHint.textContent = props.allowEmptyRange ? '範囲が空のまま登録する？ 下の「範囲はあとで」を押す。' : '範囲だけは書いて！（例：p.24〜27）';
         rangeInput.classList.add('is-error');
         rangeInput.focus();
         return;
@@ -314,23 +400,34 @@
       rangeInput.classList.remove('is-error');
       var where = state.where.slice();
       if (whereOther.value.trim()) where.push(whereOther.value.trim());
+      var nowDate = new Date();
       var item = {
-        id: 'hw_' + Date.now().toString(36),
+        id: 'hw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
         subject: state.subject || 'その他',
         range: range,
+        rangeMissing: !range,
         where: where.join('・'),
+        location: state.location || (where.length ? 'bag' : null),
         submitTo: '',
-        due: state.due || toISO(addDays(today, 1)),
+        due: state.due || defaultDue().value,
         done: false,
         packed: false,
-        createdAt: new Date().toISOString()
+        createdAt: nowDate.toISOString(),
+        createdOn: toISO(nowDate)
       };
       if (props.onSubmit) props.onSubmit(item);
-    });
+    }
+    form.getDraft = draft;
+    form.addEventListener('submit', function (e) { e.preventDefault(); submit(false); });
+    if (props.allowEmptyRange) {
+      var acts = form.querySelector('.sk-quick__actions');
+      var later = BigButton({ label: '範囲はあとで（夜に聞く）', kind: 'ghost', full: true, onClick: function () { submit(true); } });
+      acts.insertBefore(later, acts.children[1] || null);
+    }
     return form;
   }
 
-  /** あさのチェック。props: { items, today?, onToggle(item, packed), onClose? } */
+  /** あさのチェック。props: { items, today?, title?, dateText?, paperSpot?, onToggle(item, packed), onClose? } */
   function BringCheck(props) {
     props = props || {};
     var items = props.items || [];
@@ -345,13 +442,14 @@
       var row = el('li', { className: 'sk-bring__row' + (item.packed ? ' is-packed' : '') },
         box,
         el('div', { className: 'sk-bring__text' },
-          el('div', { className: 'sk-bring__meta' }, SubjectTag({ subject: item.subject }), DueChip({ due: item.due, today: props.today, done: item.done })),
+          el('div', { className: 'sk-bring__meta' }, SubjectTag({ subject: item.subject }), DueChip({ due: item.due, today: props.today, done: item.done, flags: { packed: item.packed, submitted: item.submitted, dropped: item.dropped } })),
           el('p', { className: 'sk-bring__range', text: item.range || '' }),
-          el('p', { className: 'sk-bring__status' + (item.done ? '' : ' is-pending'), text: item.done ? 'できてる。あとは入れるだけ' : 'まだ。やりかけでも持っていこう' })
+          el('p', { className: 'sk-bring__status' + (item.done ? '' : ' is-pending'), text: (item.done ? 'できてる。あとは入れるだけ' : 'まだ。やりかけでも持っていこう') + (item.location === 'school' ? '（学校にある）' : '') + (props.paperSpot && /プリント/.test(item.where || '') ? '　プリントは「' + props.paperSpot + '」' : '') })
         )
       );
       box.addEventListener('click', function () {
         item.packed = !item.packed;
+        item.packedOn = item.packed ? toISO(parseDate(props.today || new Date())) : null;
         box.setAttribute('aria-pressed', item.packed ? 'true' : 'false');
         row.classList.toggle('is-packed', item.packed);
         updateCount();
@@ -363,8 +461,8 @@
     return el('section', { className: 'sk-bring', 'aria-labelledby': 'sk-bring-title' },
       el('div', { className: 'sk-bring__head' },
         el('div', null,
-          el('h2', { className: 'sk-bring__title', id: 'sk-bring-title', text: 'あさのチェック' }),
-          el('p', { className: 'sk-bring__date', text: formatDate(props.today || new Date()) + ' に持っていくもの' })
+          el('h2', { className: 'sk-bring__title', id: 'sk-bring-title', text: props.title || 'あさのチェック' }),
+          el('p', { className: 'sk-bring__date', text: props.dateText || (formatDate(props.today || new Date()) + ' に持っていくもの') })
         ),
         props.onClose ? el('button', { className: 'sk-iconbtn', type: 'button', 'aria-label': 'とじる', onClick: props.onClose }, icon('close', 24)) : null
       ),
@@ -424,7 +522,7 @@
     var now = toNow(opts.now);
     var today = parseDate(opts.today || now);
     var pending = (opts.items || []).filter(function (i) {
-      if (i.packed) return false;
+      if (!isActive(i) || isOnline(i) || isPackedToday(i, today)) return false;
       var st = dueInfo(i.due, today, false).state;
       return st === 'today' || st === 'overdue';
     });
@@ -442,10 +540,18 @@
     late: '出る時間すぎてる。入れて、押して、出よう。'
   };
 
-  /** 焦らせるバー。props: { items, leaveAt?, now?, today?, snoozeLeft?, onPack(item), onDone(item), onSnooze() } */
+  /** 焦らせるバー。props: { items, leaveAt?, now?, today?, snoozeLeft?, snoozedUntil?, onPack(item), onDone(item), onSnooze(), onWake() } */
   function NudgeBar(props) {
     props = props || {};
     var n = nudgeStage(props);
+    if (props.snoozedUntil && (n.stage === 'calm' || n.stage === 'soon')) {
+      var until = new Date(props.snoozedUntil);
+      return el('section', { className: 'sk-nudge sk-nudge--snoozed', role: 'status' },
+        icon('clock', 24),
+        el('p', { className: 'sk-nudge__clear', text: formatClock(until) + ' にもう一度言う。' + (n.items.length ? 'まだ ' + n.items.length + ' つ。' : '') }),
+        BigButton({ label: 'いまやる', kind: 'ghost', onClick: props.onWake })
+      );
+    }
     if (n.stage === 'clear') {
       return el('section', { className: 'sk-nudge sk-nudge--clear', role: 'status' },
         icon('check', 28),
@@ -464,7 +570,7 @@
       ),
       el('p', { className: 'sk-nudge__line', text: NUDGE_LINES[n.stage] + (rest > 0 ? ' ほかに ' + rest + ' つ。' : '') }),
       el('div', { className: 'sk-nudge__actions' },
-        BigButton({ label: 'かばんに入れた', kind: 'primary', icon: 'bag', full: true, onClick: function () { if (props.onPack) props.onPack(first); } }),
+        BigButton({ label: n.items.length > 1 ? first.subject + '、入れた' : 'かばんに入れた', kind: 'primary', icon: 'bag', full: true, onClick: function () { if (props.onPack) props.onPack(first); } }),
         canSnooze ? BigButton({ label: '10分あとで' + (props.snoozeLeft !== undefined ? '（あと ' + props.snoozeLeft + ' 回）' : ''), kind: 'ghost', full: true, onClick: props.onSnooze }) : null
       )
     );
@@ -472,55 +578,114 @@
   }
 
   // ---- 捕まえる：そもそも登録し忘れないために、こっちから聞く ----
-  /** きょうの分は答えた？ capture[today] が 'none'/'added' か、きょう作った宿題があれば答えた扱い。 */
-  function captureAnswered(opts) {
+  function createdOn(item) {
+    if (!item) return null;
+    if (item.createdOn) return item.createdOn;
+    return item.createdAt ? toISO(new Date(item.createdAt)) : null;
+  }
+  /**
+   * きょうの分を科目ごとに見る。capture[日付] は { 科目: 'added'|'none' }（古い形：'none'/'added' の文字列＝全部）。
+   * きょう作った宿題は、その科目を 'added' にする。
+   * → { subjects, answered: {科目: 'added'|'none'}, unanswered: [...], all: 全部答えた, allNone: 全部なし, anyAdded }
+   */
+  function captureStatus(opts) {
     opts = opts || {};
     var today = parseDate(opts.today || new Date());
     var key = toISO(today);
-    var cap = (opts.capture || {})[key];
-    if (cap === 'none' || cap === 'added') return cap;
-    var added = (opts.items || []).some(function (i) { return !i.deleted && i.createdAt && toISO(new Date(i.createdAt)) === key; });
-    return added ? 'added' : null;
+    var subjects = captureSubjects({ today: today, timetable: opts.timetable, subjects: opts.subjects });
+    var raw = (opts.capture || {})[key];
+    var answered = {};
+    if (raw === 'none' || raw === 'added') subjects.forEach(function (sub) { answered[sub] = raw; });
+    else if (raw && typeof raw === 'object') {
+      Object.keys(raw).forEach(function (k) { if (k !== '*') answered[k] = raw[k]; });
+      if (raw['*']) subjects.forEach(function (sub) { if (!answered[sub]) answered[sub] = raw['*']; });
+    }
+    (opts.items || []).forEach(function (i) {
+      if (!i.deleted && createdOn(i) === key) answered[i.subject] = 'added';
+    });
+    var unanswered = subjects.filter(function (sub) { return answered[sub] !== 'added' && answered[sub] !== 'none'; });
+    var anyAdded = Object.keys(answered).some(function (k) { return answered[k] === 'added'; });
+    return { key: key, subjects: subjects, answered: answered, unanswered: unanswered, all: unanswered.length === 0, allNone: unanswered.length === 0 && !anyAdded, anyAdded: anyAdded };
+  }
+  /** 全部答えたら 'added'（何か登録した）か 'none'（全部なし）。まだなら null。 */
+  function captureAnswered(opts) {
+    var st = captureStatus(opts);
+    if (!st.all) return null;
+    return st.anyAdded ? 'added' : 'none';
   }
   /** きょう聞く科目。時間割があればその日の科目、なければ 6 科目。 */
   function captureSubjects(opts) {
     opts = opts || {};
+    if (Array.isArray(opts.subjects) && opts.subjects.length) return opts.subjects.slice(0, 7);
     var today = parseDate(opts.today || new Date());
     var tt = opts.timetable || {};
     var list = tt[String(today.getDay())];
-    if (Array.isArray(list) && list.length) return list.slice(0, 8);
+    if (Array.isArray(list) && list.length) return list.slice(0, 7);
     return SUBJECTS.map(function (s) { return s.label; });
   }
+  /** 聞き方は回を追うごとに変える（同じ文は慣れる）。 */
+  function captureWording(askNo, today, subs) {
+    var d = parseDate(today || new Date());
+    if (askNo <= 1) return 'きょう、宿題出た？';
+    if (askNo === 2) return WEEKDAYS[d.getDay()] + '曜。' + subs.join('・') + '。どれか出た？';
+    if (askNo === 3) return 'まだ答えてない。Classroom と連絡帳を開いて確かめて。';
+    return 'まだ ' + subs.join('・') + ' が答えてない。見て押すだけ。';
+  }
 
-  /** 放課後の「きょう、宿題出た？」。props: { subjects?, timetable?, today?, asked?, answered?, onPick(subject), onNone() } */
+  /**
+   * 放課後の「きょう、宿題出た？」。科目ごとに「出た／なし」。
+   * props: { items?, capture?, timetable?, subjects?, today?, asked?, handin?: items, onPick(subject), onNone(subject), onNoneAll(), onReopen(), onSubmit(item), onDrop(item) }
+   */
   function CaptureAsk(props) {
     props = props || {};
-    var answered = props.answered || null;
-    if (answered) {
-      return el('section', { className: 'sk-capture sk-capture--done', role: 'status' },
-        icon('check', 28),
-        el('p', { className: 'sk-capture__done', text: answered === 'none' ? 'きょうは宿題なし。OK。' : 'きょうの分、入れた。えらい。' }));
-    }
-    var subjects = props.subjects || captureSubjects(props);
+    var st = captureStatus(props);
     var asked = props.asked || 1;
+    var handin = (props.handin || []);
+    var handinRows = handin.length ? el('div', { className: 'sk-capture__handin' },
+      el('p', { className: 'sk-capture__sub', text: '持っていったぶん、出した？' }),
+      handin.map(function (item) {
+        return el('div', { className: 'sk-capture__row' },
+          SubjectTag({ subject: item.subject }),
+          el('span', { className: 'sk-capture__name', text: item.range || '' }),
+          el('button', { className: 'sk-choice sk-choice--yes', type: 'button', text: '出した', onClick: function () { if (props.onSubmit) props.onSubmit(item); } }),
+          dueInfo(item.due, props.today, item.done, { packed: item.packed }).state === 'handin' && props.onDrop ? el('button', { className: 'sk-choice', type: 'button', text: '先生に言った', onClick: function () { props.onDrop(item); } }) : null
+        );
+      })) : null;
+    if (st.all) {
+      return el('section', { className: 'sk-capture sk-capture--done', role: 'status' },
+        el('div', { className: 'sk-capture__doneRow' },
+          icon('check', 28),
+          el('p', { className: 'sk-capture__done', text: st.anyAdded ? 'きょうの分、入れた。えらい。' : 'きょうは宿題なし。OK。' }),
+          props.onReopen ? el('button', { className: 'sk-choice', type: 'button', text: 'やっぱりあった', onClick: props.onReopen }) : null
+        ),
+        handinRows);
+    }
     return el('section', { className: 'sk-capture' + (asked >= 3 ? ' sk-capture--again' : ''), role: asked >= 3 ? 'alert' : 'status' },
       el('p', { className: 'sk-capture__eyebrow', text: asked > 1 ? '放課後のチェック ・ ' + asked + ' 回目' : '放課後のチェック' }),
-      el('h2', { className: 'sk-capture__title', text: asked >= 3 ? 'まだ答えてない。宿題、出た？' : 'きょう、宿題出た？' }),
-      el('p', { className: 'sk-capture__line', text: '出た科目を押す。1 つずつ、10 秒で。なければ「なし」。' }),
-      el('div', { className: 'sk-choices', role: 'group', 'aria-label': '宿題が出た科目' }, subjects.map(function (sub) {
-        return el('button', { className: 'sk-choice', type: 'button', text: sub, onClick: function () { if (props.onPick) props.onPick(sub); } });
+      el('h2', { className: 'sk-capture__title', text: captureWording(asked, props.today, st.unanswered) }),
+      el('p', { className: 'sk-capture__line', text: '科目ごとに「出た」か「なし」。出たら 10 秒で登録、範囲はあとでもいい。' }),
+      el('div', { className: 'sk-capture__rows', role: 'group', 'aria-label': '科目ごとの答え' }, st.unanswered.map(function (sub) {
+        return el('div', { className: 'sk-capture__row' },
+          el('span', { className: 'sk-capture__name', text: sub }),
+          el('button', { className: 'sk-choice sk-choice--yes', type: 'button', text: '出た', 'aria-label': sub + '：出た', onClick: function () { if (props.onPick) props.onPick(sub); } }),
+          el('button', { className: 'sk-choice', type: 'button', text: 'なし', 'aria-label': sub + '：なし', onClick: function () { if (props.onNone) props.onNone(sub); } })
+        );
       })),
-      BigButton({ label: 'きょうは なし', kind: 'secondary', icon: 'check', full: true, onClick: props.onNone })
+      Object.keys(st.answered).length ? el('p', { className: 'sk-capture__sub', text: '答えた：' + st.subjects.filter(function (x) { return st.answered[x]; }).map(function (x) { return x + (st.answered[x] === 'added' ? '（入れた）' : '（なし）'); }).join('、') }) : null,
+      st.unanswered.length > 1 && props.onNoneAll ? BigButton({ label: 'のこりは ぜんぶ なし', kind: 'ghost', full: true, onClick: props.onNoneAll }) : null,
+      handinRows
     );
   }
 
   // ---- Discord へ送るメッセージ ----
-  var EMBED_COLORS = { calm: 0xffe1ef, soon: 0xffe1ef, urgent: 0xff8fc5, late: 0x111111, evening: 0xffe1ef, overdue: 0x111111, clear: 0xf2f2f2 };
-  var FOOTER = { calm: '宿題忘れゼロ', soon: '宿題忘れゼロ ・ 15 分前にもう一度言う', urgent: '宿題忘れゼロ ・ 押すまで 10 分ごとに言う', late: '宿題忘れゼロ ・ 押すまで 10 分ごとに言う（あと 5 回）', evening: '宿題忘れゼロ ・ まだなら 21:30 にもう一度', overdue: '宿題忘れゼロ ・ 出すまで 16:00 / 19:00 / 21:00 に言う', clear: '宿題忘れゼロ' };
+  // Discord はほぼダークテーマ：黒の帯は見えないので、late と overdue は白（ink のダーク値）
+  var EMBED_COLORS = { calm: 0xffe1ef, soon: 0xffe1ef, urgent: 0xff8fc5, late: 0xf5f5f5, evening: 0xffe1ef, overdue: 0xf5f5f5, clear: 0xf2f2f2 };
+  var FOOTER = { calm: '宿題忘れゼロ', soon: '宿題忘れゼロ ・ 15 分前にもう一度言う', urgent: '宿題忘れゼロ ・ 押すまで 10 分ごとに言う', late: '宿題忘れゼロ ・ 押すまで 10 分ごとに言う', evening: '宿題忘れゼロ ・ まだなら 21:30 にもう一度', overdue: '宿題忘れゼロ ・ 出すか、先生に言うまで', clear: '宿題忘れゼロ' };
 
   function itemLine(i, today) {
-    var d = dueInfo(i.due, today, i.done);
-    return '・' + (i.subject || '') + '　' + (i.range || '') + '　｜　' + (i.where ? 'どこ：' + i.where : 'どこ：まだ書いてない') + '　｜　' + (i.done ? 'できてる' : 'まだ') + (d.state === 'overdue' ? '（' + d.label + '）' : '');
+    var d = dueInfo(i.due, today, i.done, { packed: i.packed });
+    var status = d.state === 'handin' ? '持っていった → 出した？' : (i.done ? 'できてる' : 'まだ') + (d.state === 'overdue' ? '（' + d.label + '）' : '');
+    return '・' + (i.subject || '') + '　' + (i.range || '範囲？') + '　｜　' + (i.where ? 'どこ：' + i.where : 'どこ：まだ書いてない') + (i.location === 'school' ? '（学校）' : '') + '　｜　' + status;
   }
 
   /**
@@ -532,35 +697,50 @@
     var now = toNow(props.now);
     var today = parseDate(props.today || now);
     var kind = props.kind || 'morning';
-    var items, title, stageKey, mention = '';
+    var live = (props.items || []).filter(function (i) { return !i.deleted; });
+    var items, title, stageKey, mention = '', est = null;
     if (kind === 'evening') {
       var tomorrow = addDays(today, 1);
-      items = (props.items || []).filter(function (i) { return !i.done && parseDate(i.due) <= tomorrow; });
+      items = live.filter(function (i) { return isActive(i) && !i.done && parseDate(i.due) <= tomorrow; });
       title = 'あしたまで ' + items.length + ' つ。いまのうちに。';
-      if (props.captureMissing) title = 'きょう登録ゼロ。ほんとに宿題なし？ ' + (items.length ? title : '');
+      est = (props.capture !== undefined || props.timetable) ? captureStatus({ items: live, capture: props.capture, today: today, timetable: props.timetable }) : null;
+      if (est && !est.all) title = 'まだ答えてない科目：' + est.unanswered.join('・') + '。出た？ ' + (items.length ? title : '');
+      else if (est && est.allNone && props.askAgainOnNone) title = 'きょうは全部「なし」。ほんとに？ Classroom は見た？ ' + (items.length ? title : '');
+      else if (props.captureMissing) title = 'きょう登録ゼロ。ほんとに宿題なし？ ' + (items.length ? title : '');
       stageKey = 'evening';
     } else if (kind === 'capture') {
-      var subs = captureSubjects({ today: today, timetable: props.timetable });
+      var cst = captureStatus({ items: live, capture: props.capture, today: today, timetable: props.timetable, subjects: props.subjects });
+      var subs = cst.unanswered;
       var askNo = props.askNo || 1;
-      title = askNo >= 3 ? 'まだ答えてない。きょう、宿題出た？' : 'きょう、宿題出た？';
+      title = captureWording(askNo, today, subs);
       var rows = [];
-      for (var r = 0; r < subs.length; r += 5) {
-        rows.push({ type: 1, components: subs.slice(r, r + 5).map(function (sub) { return { type: 2, style: 2, label: sub, custom_id: 'cap:' + sub }; }) });
-      }
-      rows.push({ type: 1, components: [{ type: 2, style: 3, label: 'きょうは なし', custom_id: 'capnone' }].concat(props.appUrl ? [{ type: 2, style: 5, label: 'アプリで登録', url: props.appUrl }] : []) });
+      var caps = [];
+      subs.forEach(function (sub) { caps.push({ type: 2, style: 2, label: sub + '：出た', custom_id: 'cap:' + sub }); caps.push({ type: 2, style: 2, label: sub + '：なし', custom_id: 'capno:' + sub }); });
+      for (var r = 0; r < caps.length && rows.length < 3; r += 5) rows.push({ type: 1, components: caps.slice(r, r + 5) });
+      // 持っていったぶん、出した？
+      var handin = live.filter(function (i) { return isActive(i) && i.packed && parseDate(i.due) <= today; }).slice(0, 2);
+      if (handin.length) rows.push({ type: 1, components: handin.map(function (i) { return { type: 2, style: 3, label: '出した：' + i.subject, custom_id: 'submit:' + i.id }; }) });
+      var tail = [];
+      if (subs.length > 1) tail.push({ type: 2, style: 2, label: 'のこりは ぜんぶ なし', custom_id: 'capnone' });
+      if (props.appUrl) tail.push({ type: 2, style: 5, label: 'アプリで登録', url: props.appUrl });
+      if (tail.length && rows.length < 5) rows.push({ type: 1, components: tail });
+      var desc = '科目ごとに「出た」か「なし」。「出た」→ 範囲とどこにあるかを書く（範囲は空でもいい）。';
+      if (Object.keys(cst.answered).length) desc += '\n答えた：' + cst.subjects.filter(function (x) { return cst.answered[x]; }).map(function (x) { return x + (cst.answered[x] === 'added' ? '（入れた）' : '（なし）'); }).join('、');
+      if (handin.length) desc += '\n持っていったぶん：' + handin.map(function (i) { return i.subject + ' ' + (i.range || ''); }).join('、') + ' → 出した？';
       return {
         content: ((askNo >= 3 && props.userId) ? '<@' + props.userId + '> ' : '') + title,
-        embeds: [{ title: title, description: '出た科目を押す → 範囲とどこにあるかを書く。10 秒。なければ「なし」。' + (askNo > 1 ? '\n答えるまで 30 分おきに聞く（' + askNo + ' 回目）。' : ''), color: askNo >= 3 ? 0xff8fc5 : 0xffe1ef, footer: { text: '宿題忘れゼロ ・ 放課後のチェック' }, timestamp: now.toISOString() }],
+        embeds: [{ title: title, description: desc, color: askNo >= 3 ? 0xff8fc5 : 0xffe1ef, footer: { text: '宿題忘れゼロ ・ 放課後のチェック' }, timestamp: now.toISOString() }],
         components: rows,
         allowed_mentions: { users: props.userId ? [props.userId] : [] }
       };
     } else if (kind === 'overdue') {
-      items = (props.items || []).filter(function (i) { return !i.done && dueInfo(i.due, today).state === 'overdue'; });
-      title = '出してないのが ' + items.length + ' つ。あしたの朝いちで出そう。';
+      items = live.filter(function (i) { return isActive(i) && parseDate(i.due) < today; });
+      var notDone = items.filter(function (i) { return !i.done && !i.packed; }).length;
+      title = notDone ? '出してないのが ' + items.length + ' つ。あしたの朝いちで出そう。' : '持っていったぶん ' + items.length + ' つ、出した？';
       stageKey = 'overdue';
-      mention = props.userId ? '<@' + props.userId + '> ' : '';
+      mention = (props.userId && !props.quietMention) ? '<@' + props.userId + '> ' : '';
     } else {
-      var n = nudgeStage({ items: props.items, today: today, now: now, leaveAt: props.leaveAt });
+      var n = nudgeStage({ items: live, today: today, now: now, leaveAt: props.leaveAt });
       items = n.items;
       stageKey = n.stage;
       if (n.stage === 'clear') { title = 'ぜんぶ入れた。いってらっしゃい！'; }
@@ -568,23 +748,45 @@
       else { title = '出るまで ' + n.label + '。' + (n.stage === 'urgent' ? 'いますぐ入れる。' : 'きょう持っていくもの ' + items.length + ' つ。'); mention = (n.stage === 'urgent' && props.userId) ? '<@' + props.userId + '> ' : ''; }
     }
     var lines = items.map(function (i) { return itemLine(i, today); });
-    var buttons = [];
+    var missing = kind === 'evening' ? live.filter(function (i) { return isActive(i) && !i.range; }).slice(0, 3) : [];
+    if (missing.length) lines.push('範囲が空：' + missing.map(function (i) { return i.subject; }).join('・') + ' → 下の「範囲を書く」');
+    var compRows = [];
+    var row1 = [];
     if (items.length) {
-      buttons.push({ type: 2, style: 3, label: 'かばんに入れた', custom_id: 'pack:' + items.map(function (i) { return i.id; }).join(',') });
-      buttons.push({ type: 2, style: 2, label: 'やった', custom_id: 'done:' + items[0].id });
-      if (stageKey === 'calm' || stageKey === 'soon' || stageKey === 'evening') buttons.push({ type: 2, style: 2, label: '10分あとで', custom_id: 'snooze:' + items[0].id });
-      if (props.appUrl) buttons.push({ type: 2, style: 5, label: 'アプリで見る', url: props.appUrl });
+      if (kind === 'overdue') {
+        items.slice(0, 2).forEach(function (i) { row1.push({ type: 2, style: 3, label: '出した：' + i.subject, custom_id: 'submit:' + i.id }); row1.push({ type: 2, style: 2, label: '先生に言った：' + i.subject, custom_id: 'drop:' + i.id }); });
+      } else if (items.length > 1 && items.length <= 4) {
+        items.forEach(function (i) { row1.push({ type: 2, style: 3, label: '入れた：' + i.subject, custom_id: 'pack:' + i.id }); });
+      } else {
+        row1.push({ type: 2, style: 3, label: 'かばんに入れた', custom_id: 'pack:' + items.map(function (i) { return i.id; }).join(',') });
+      }
+      if (kind !== 'overdue') row1.push({ type: 2, style: 2, label: 'やった', custom_id: 'done:' + items[0].id });
+      compRows.push({ type: 1, components: row1.slice(0, 5) });
+      var row2 = [];
+      if (stageKey === 'calm' || stageKey === 'soon' || stageKey === 'evening') row2.push({ type: 2, style: 2, label: '10分あとで', custom_id: 'snooze:' + items[0].id });
+      if (props.appUrl) row2.push({ type: 2, style: 5, label: 'アプリで見る', url: props.appUrl });
+      if (row2.length) compRows.push({ type: 1, components: row2 });
+    }
+    if (kind === 'evening') {
+      if (missing.length) compRows.push({ type: 1, components: missing.map(function (i) { return { type: 2, style: 2, label: '範囲を書く：' + i.subject, custom_id: 'fix:' + i.id }; }) });
+      if (est && !est.all) {
+        var capBtns = [];
+        est.unanswered.slice(0, 2).forEach(function (sub) { capBtns.push({ type: 2, style: 2, label: sub + '：出た', custom_id: 'cap:' + sub }); capBtns.push({ type: 2, style: 2, label: sub + '：なし', custom_id: 'capno:' + sub }); });
+        compRows.push({ type: 1, components: capBtns.slice(0, 5) });
+      } else if (est && est.allNone && props.askAgainOnNone) {
+        compRows.push({ type: 1, components: [{ type: 2, style: 2, label: 'やっぱりあった', custom_id: 'capreopen' }].concat(props.classroomUrl ? [{ type: 2, style: 5, label: 'Classroom を見る', url: props.classroomUrl }] : []) });
+      }
     }
     return {
       content: mention + title,
       embeds: [{
         title: title,
-        description: lines.length ? lines.join('\n') : 'きょう持っていく宿題はない。',
+        description: lines.length ? lines.join('\n') : (kind === 'evening' ? 'あしたまでの宿題はない。' : 'きょう持っていく宿題はない。'),
         color: EMBED_COLORS[stageKey] || EMBED_COLORS.calm,
         footer: { text: FOOTER[stageKey] || FOOTER.calm },
         timestamp: now.toISOString()
       }],
-      components: buttons.length ? [{ type: 1, components: buttons }] : [],
+      components: compRows.slice(0, 5),
       allowed_mentions: { users: props.userId ? [props.userId] : [] }
     };
   }
@@ -637,7 +839,15 @@
     DiscordPreview: DiscordPreview,
     CaptureAsk: CaptureAsk,
     captureAnswered: captureAnswered,
+    captureStatus: captureStatus,
     captureSubjects: captureSubjects,
+    captureWording: captureWording,
+    isActive: isActive,
+    isOnline: isOnline,
+    isPackedToday: isPackedToday,
+    nextSchoolDay: nextSchoolDay,
+    nextLesson: nextLesson,
+    LOCATION_PRESETS: LOCATION_PRESETS,
     nudgeStage: nudgeStage,
     discordPayload: discordPayload,
     minutesUntilLeave: minutesUntilLeave,

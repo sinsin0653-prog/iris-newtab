@@ -19,6 +19,7 @@ const check = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if
 try {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, locale: 'ja-JP', timezoneId: 'Asia/Tokyo' });
   const page = await ctx.newPage();
+  await page.clock.setFixedTime(new Date('2026-10-09T07:30:00+09:00'));
   page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: 'load' });
@@ -66,7 +67,10 @@ try {
   // 完了 → もどす
   await page.click('.sk-hero .sk-btn--primary');
   await page.waitForSelector('.toast');
-  check((await page.textContent('.toast')).includes('できた'), '完了すると 5 秒の「もどす」が出る');
+  const toastText = await page.textContent('.toast');
+  check(toastText.includes('できた') && toastText.includes('もどす'), '完了すると 5 秒の「もどす」が出る（' + toastText.trim() + '）');
+  check(await page.$('.sk-hero.is-done') !== null, '主役が打ち消し線になってから次へ（手応え）');
+  await page.waitForFunction(() => (document.querySelector('.sk-hero__range') || {}).textContent?.includes('ワーク p.12'));
   check((await page.textContent('.sk-hero__range')).includes('ワーク p.12'), '次の宿題が主役になる');
   await page.click('.toast .sk-btn');
   await page.waitForSelector('.toast', { state: 'detached' });
@@ -86,7 +90,7 @@ try {
   check((await page.textContent('#app')).includes('ロッカー'), '編集した場所が反映される');
 
   // 設定：出る時間を変える
-  await page.click('button[aria-label="設定"]');
+  await page.click('.sk-pill:has-text("設定")');
   await page.waitForSelector('.panel');
   await page.fill('.panel input[type="time"]', '08:10');
   await page.screenshot({ path: path.join(shots, '04-settings.png') });
@@ -117,52 +121,93 @@ try {
     const st = JSON.parse(localStorage.getItem('shukudai.state.v1'));
     const d = new Date(); const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     st.items.push({ id: 'e2e', subject: '社会', range: 'プリント 1 枚', where: 'プリント', due: iso, done: false, packed: false, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-    const soon = new Date(Date.now() + 20 * 60000);
-    st.settings.leaveAt = `${String(soon.getHours()).padStart(2, '0')}:${String(soon.getMinutes()).padStart(2, '0')}`;
+    st.settings.leaveAt = '07:50'; // いまは 07:30 固定 → 20 分前
+    st.settings.schoolDays = [d.getDay()];
     localStorage.setItem('shukudai.state.v1', JSON.stringify(st));
   });
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.sk-nudge');
   check((await page.getAttribute('.sk-nudge', 'class')).includes('sk-nudge--soon'), '出発 20 分前は NudgeBar が soon');
+  check((await page.getAttribute('.fab .sk-btn', 'class')).includes('sk-btn--secondary'), 'バーがピンクのあいだ「追加」は脇役');
   await page.emulateMedia({ colorScheme: 'light' });
   await page.waitForTimeout(100);
   await page.screenshot({ path: path.join(shots, '07-nudge.png') });
+  // 10分あとで → 1 行にたたまれる → いまやる で戻る
+  await page.click('.sk-nudge .sk-btn--ghost');
+  await page.waitForSelector('.sk-nudge--snoozed');
+  check((await page.textContent('.sk-nudge--snoozed')).includes('07:40 にもう一度言う'), '「あとで」はバーを消さず、いつ戻るかを言う');
+  await page.click('.sk-nudge--snoozed .sk-btn');
+  await page.waitForSelector('.sk-nudge--soon');
   await page.click('.sk-nudge .sk-btn--primary');
   await page.waitForSelector('.sk-nudge--clear');
   check(true, '「かばんに入れた」で clear になる');
   await page.screenshot({ path: path.join(shots, '08-nudge-clear.png') });
 
-  // 捕まえる：放課後の時刻を 1 時間前にして、きょうを学校のある日にする
+  // 捕まえる：放課後を 06:30 にして（いまは 07:30 固定 → 60 分経過 = 3 回目）、きょうを学校のある日にする
   await page.evaluate(() => {
     const st = JSON.parse(localStorage.getItem('shukudai.state.v1'));
     const d = new Date();
-    st.settings.afterSchoolAt = '00:00'; // 何時に走っても「放課後のあと」になるように
+    st.settings.afterSchoolAt = '06:30';
     st.settings.quietFrom = '23:59';
     st.settings.schoolDays = [d.getDay()];
     st.settings.timetable = { [d.getDay()]: ['数学', '英語', '理科'] };
     st.capture = {};
-    st.items = st.items.map((i) => ({ ...i, createdAt: '2020-01-01T00:00:00Z' }));
+    st.items = st.items.map((i) => ({ ...i, createdAt: '2020-01-01T00:00:00Z', createdOn: '2020-01-01' }));
     localStorage.setItem('shukudai.state.v1', JSON.stringify(st));
   });
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.sk-capture');
-  const expectAsked = await page.evaluate(() => Math.min(3, Math.floor((new Date().getHours() * 60 + new Date().getMinutes()) / 30) + 1));
-  const eyebrow = await page.textContent('.sk-capture__eyebrow');
-  check(eyebrow.includes('放課後のチェック') && (expectAsked === 1 ? !eyebrow.includes('回目') : eyebrow.includes(expectAsked + ' 回目')), '経過時間に応じた回数で聞く（' + expectAsked + ' 回目）');
-  const subj = await page.$$eval('.sk-capture .sk-choice', (b) => b.map((x) => x.textContent));
-  check(subj.join(',') === '数学,英語,理科', '時間割の科目だけを聞く');
+  check((await page.textContent('.sk-capture__eyebrow')).includes('3 回目'), '放課後から 60 分で 3 回目の聞き方になる');
+  check((await page.textContent('.sk-capture__title')).includes('Classroom と連絡帳'), '3 回目は文言が変わる');
+  const subj = await page.$$eval('.sk-capture__rows .sk-capture__row .sk-capture__name', (b) => b.map((x) => x.textContent));
+  check((await page.textContent('.sk-capture__handin')).includes('出した？'), '持っていったぶんの「出した？」が出る');
+  check(subj.join(',') === '数学,英語,理科', '時間割の科目だけを、科目ごとに聞く');
   await page.screenshot({ path: path.join(shots, '09-capture.png') });
-  await page.click('.sk-capture .sk-choice:has-text("英語")');
+  await page.click('.sk-capture__row:has-text("英語") .sk-choice--yes');
   await page.waitForSelector('.sk-quick');
-  check(await page.getAttribute('.sk-quick .sk-choice:has-text("英語")', 'aria-checked') === 'true', '科目を押すと登録シートに科目が入っている');
-  await page.keyboard.press('Escape');
+  check(await page.getAttribute('.sk-quick .sk-choice:has-text("英語")', 'aria-checked') === 'true', '「出た」を押すと登録シートに科目が入っている');
+  check((await page.textContent('.sk-quick')).includes('範囲はあとで'), '放課後からの登録は範囲が空でもいい');
+  check((await page.textContent('.sk-quick .sk-choices[aria-label="いつまで"]')).includes('次の'), '期限の既定が「次の○○」');
+  await page.click('.sk-quick .sk-btn--ghost:has-text("範囲はあとで")');
   await page.waitForSelector('.sk-quick', { state: 'detached' });
-  await page.click('.sk-capture .sk-btn--secondary');
+  check((await page.textContent('.sk-capture')).includes('英語（入れた）'), '登録した科目は「入れた」になり、ほかの科目はまだ聞く');
+  check((await page.textContent('#app')).includes('範囲？まだ書いてない'), '範囲が空の宿題はそう出る');
+  await page.click('.sk-capture__row:has-text("数学") .sk-choice:not(.sk-choice--yes)');
+  await page.waitForFunction(() => document.querySelector('.sk-capture')?.textContent.includes('数学（なし）'));
+  check(true, '「なし」は科目ごと');
+  await page.click('.sk-capture__row:has-text("理科") .sk-choice:not(.sk-choice--yes)');
   await page.waitForSelector('.sk-capture--done');
-  check((await page.textContent('.sk-capture--done')).includes('なし'), '「なし」で答えた扱いになる');
+  check((await page.textContent('.sk-capture--done')).includes('入れた'), '全部答えると小さくなる');
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.sk-capture--done');
   check(true, 'リロードしても聞き直さない');
+  await page.click('.sk-capture--done .sk-choice:has-text("やっぱりあった")');
+  await page.waitForSelector('.sk-capture__row');
+  check(true, '「やっぱりあった」で聞き直せる');
+
+  // 書きかけをとっておく
+  await page.click('.fab .sk-btn');
+  await page.waitForSelector('.sk-quick');
+  await page.fill('#sk-range', 'かきかけ');
+  await page.click('.sk-quick .sk-btn--ghost:has-text("あとで")');
+  await page.waitForSelector('.draft');
+  check((await page.textContent('.draft')).includes('かきかけ'), '「あとで」は書きかけを捨てない');
+  await page.click('.draft');
+  await page.waitForSelector('.sk-quick');
+  check(await page.inputValue('#sk-range') === 'かきかけ', '書きかけが復元される');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.sk-quick', { state: 'detached' });
+
+  // こんしゅう と ?board=1
+  await page.click('.sk-pill:has-text("こんしゅう")');
+  await page.waitForSelector('.week');
+  check((await page.$$('.week__day')).length === 7, 'こんしゅうは 7 日');
+  await page.screenshot({ path: path.join(shots, '10-week.png') });
+  await page.keyboard.press('Escape');
+  await page.goto(`http://127.0.0.1:${PORT}/?board=1`, { waitUntil: 'load' });
+  await page.waitForSelector('.week--big');
+  check(await page.$('.fab') === null, 'board 表示は操作ボタンなし');
+  await page.screenshot({ path: path.join(shots, '11-board.png') });
 
   // ?add=1 で登録シートが開く（ホーム画面のショートカット用）
   await page.goto(`http://127.0.0.1:${PORT}/?add=1`, { waitUntil: 'load' });

@@ -16,6 +16,8 @@
 .sk-chip--soon    { color: var(--due-soon);    background: var(--due-soon-fill); }
 .sk-chip--later   { color: var(--due-later);   background: var(--due-later-fill); }
 .sk-chip--done    { color: var(--done);        background: var(--done-fill); }
+.sk-chip--handin  { color: var(--due-today);   background: var(--due-today-fill); }
+.sk-chip--submitted, .sk-chip--dropped { color: var(--done); background: var(--done-fill); }
 
 /* ---- SubjectTag ---- */
 .sk-tag {
@@ -84,6 +86,9 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
 .sk-card.is-done .sk-card__range { text-decoration: line-through; color: var(--done); }
 .sk-card.is-done .sk-card__where { color: var(--muted); }
 .sk-card.is-done .sk-tag { border-color: var(--muted); color: var(--muted); background: transparent; }
+.sk-card__range.is-missing { color: var(--muted); font-weight: 500; }
+.sk-card__actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+.sk-card.is-closed { opacity: .7; }
 
 /* ---- TodayHero ---- */
 .sk-hero {
@@ -95,6 +100,9 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
 }
 .sk-hero__eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--accent-ink); }
 .sk-hero__range { margin: 0; font-family: var(--font-display); font-size: 36px; line-height: 44px; font-weight: 400; letter-spacing: -.01em; text-transform: uppercase; overflow-wrap: anywhere; }
+.sk-hero__range.is-missing { color: var(--muted); }
+.sk-hero.is-done .sk-hero__range { text-decoration: line-through; color: var(--done); }
+.sk-hero.is-done { background: var(--done-fill); border-color: transparent; }
 .sk-hero__meta { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
 .sk-hero__where { display: inline-flex; gap: var(--space-1); align-items: center; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--ink-soft); }
 .sk-hero__where.is-missing { color: var(--muted); }
@@ -137,6 +145,8 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
 .sk-input--sub { min-height: var(--tap-min); }
 .sk-hint { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: .02em; color: var(--accent-ink); }
 .sk-hint:empty { display: none; }
+.sk-hint--calm { color: var(--ink-soft); font-weight: 500; }
+.sk-field__sub { margin: var(--space-1) 0 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; letter-spacing: .08em; color: var(--muted); }
 .sk-quick__actions { display: flex; flex-direction: column; gap: var(--space-2); }
 
 /* ---- BringCheck ---- */
@@ -192,7 +202,7 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
   font-family: var(--font-sans);
 }
 .sk-nudge__eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
-.sk-nudge__count { margin: 0; font-family: var(--font-display); font-size: 64px; line-height: 64px; font-weight: 400; font-variant-numeric: tabular-nums; }
+.sk-nudge__count { margin: 0; font-family: var(--font-display); font-size: 64px; line-height: 64px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .sk-nudge__item { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-2); }
 .sk-nudge__range { font-size: 18px; line-height: 26px; font-weight: 700; overflow-wrap: anywhere; }
 .sk-nudge__state { font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .04em; padding: 2px var(--space-2); border: var(--border) solid currentColor; border-radius: var(--radius-pill); }
@@ -209,6 +219,8 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
 .sk-nudge--late .sk-btn--primary { border-color: var(--ground); }
 .sk-nudge--clear { flex-direction: row; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--accent-soft); border-color: transparent; }
 .sk-nudge__clear { margin: 0; font-size: 16px; line-height: 24px; font-weight: 700; }
+.sk-nudge--snoozed { flex-direction: row; align-items: center; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--surface-soft); border-color: transparent; }
+.sk-nudge--snoozed .sk-btn--ghost { margin-left: auto; }
 
 /* ---- CaptureAsk（放課後の「きょう、宿題出た？」）---- 聞く側から行く。答えるまで居座る */
 .sk-capture {
@@ -227,6 +239,17 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
 .sk-capture .sk-btn--secondary { margin-top: var(--space-2); }
 .sk-capture--done { flex-direction: row; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--surface-soft); border-color: transparent; }
 .sk-capture__done { margin: 0; font-size: 16px; line-height: 24px; font-weight: 700; }
+.sk-capture__doneRow { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); width: 100%; }
+.sk-capture__doneRow .sk-choice { margin-left: auto; min-height: 40px; }
+.sk-capture__rows { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; }
+.sk-capture__row { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+.sk-capture__name { flex: 1 1 auto; min-width: 4em; font-size: 18px; line-height: 26px; font-weight: 700; }
+.sk-capture__row .sk-choice { min-height: var(--tap-min); padding: 0 var(--space-4); }
+.sk-capture .sk-choice--yes { background: var(--accent); border-color: var(--ink); color: var(--on-accent); }
+.sk-capture--again .sk-choice--yes { background: var(--ink); color: var(--ground); }
+.sk-capture__sub { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; letter-spacing: .06em; color: var(--ink-soft); }
+.sk-capture__handin { display: flex; flex-direction: column; gap: var(--space-2); width: 100%; padding-top: var(--space-2); border-top: var(--border) dashed var(--line-strong); }
+.sk-capture--done .sk-capture__handin { border-top-color: var(--line); }
 
 /* ---- DiscordPreview（Discord ではこう見える）---- Discord 側の見た目をまねた見本。トークンはこのシステムのもの */
 .sk-dc {

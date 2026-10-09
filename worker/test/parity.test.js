@@ -47,3 +47,14 @@ test('discordPayload agrees', () => {
   ];
   for (const c of cases) assert.deepEqual(core.discordPayload(c), S.discordPayload(c));
 });
+
+test('captureStatus / nextLesson / isPackedToday agree', () => {
+  const opts = { items: items().map((i, k) => (k === 0 ? { ...i, createdOn: '2026-10-09' } : i)), capture: { '2026-10-09': { '理科': 'none' } }, today: '2026-10-09', timetable: { 5: ['数学', '英語', '理科'] } };
+  assert.deepEqual(core.captureStatus(opts), S.captureStatus(opts));
+  assert.deepEqual(core.captureStatus({ today: '2026-10-09', capture: { '2026-10-09': { '*': 'none', '数学': 'added' } } }), S.captureStatus({ today: '2026-10-09', capture: { '2026-10-09': { '*': 'none', '数学': 'added' } } }));
+  assert.equal(core.nextLesson('数学', '2026-10-09', { 2: ['数学'] }).date.getTime(), S.nextLesson('数学', '2026-10-09', { 2: ['数学'] }).date.getTime());
+  assert.equal(core.nextSchoolDay('2026-10-09', [1, 3]).getDay(), 1);
+  assert.equal(core.isPackedToday({ packed: true, packedOn: '2026-10-08' }, '2026-10-09'), S.isPackedToday({ packed: true, packedOn: '2026-10-08' }, '2026-10-09'));
+  for (const flags of [{ packed: true }, { submitted: true }, { dropped: true }, {}]) assert.deepEqual(core.dueInfo('2026-10-07', '2026-10-09', true, flags), S.dueInfo('2026-10-07', '2026-10-09', true, flags));
+  assert.equal(core.captureWording(2, '2026-10-09', ['数学']), S.captureWording(2, '2026-10-09', ['数学']));
+});

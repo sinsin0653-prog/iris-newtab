@@ -1,5 +1,5 @@
 // Discord とのやりとり：署名の確認、REST、ボタンとスラッシュコマンドの応答。
-import { discordPayload, parseDate, addDays, toISO, nudgeStage, captureAnswered, captureSubjects } from './core.js';
+import { discordPayload, parseDate, addDays, toISO, nudgeStage, captureStatus, captureSubjects, nextLesson, isActive } from './core.js';
 import { withDefaults } from './state.js';
 import { localParts } from './scheduler.js';
 
@@ -66,10 +66,11 @@ const ephemeral = (content) => ({ type: 4, data: { content, flags: 64 } });
 const update = (data) => ({ type: 7, data });
 
 /** 「あした」「あさって」「来週」「きょう」「10-14」「10/14」「2026-10-14」を日付に。わからなければ あした。 */
-export function parseDueWords(text, todayKey) {
+export function parseDueWords(text, todayKey, ctx = {}) {
   const t = String(text || '').trim();
   const today = parseDate(todayKey);
-  if (!t || /^あした|明日|^tomorrow$/i.test(t)) return toISO(addDays(today, 1));
+  if (!t || /^次|つぎ|next/i.test(t)) return toISO(nextLesson(ctx.subject || '', today, ctx.timetable, ctx.schoolDays).date);
+  if (/^あした|明日|^tomorrow$/i.test(t)) return toISO(addDays(today, 1));
   if (/^あさって|明後日/.test(t)) return toISO(addDays(today, 2));
   if (/^来週|らいしゅう/.test(t)) return toISO(addDays(today, 7));
   if (/^きょう|今日|^today$/i.test(t)) return toISO(today);
@@ -83,12 +84,21 @@ export function parseDueWords(text, todayKey) {
   }
   m = /^\+(\d+)$/.exec(t);
   if (m) return toISO(addDays(today, +m[1]));
-  return toISO(addDays(today, 1));
+  return toISO(nextLesson(ctx.subject || '', today, ctx.timetable, ctx.schoolDays).date);
 }
-function captureRows(subjects, more) {
+/** capture[日付] を科目ごとの形にして書き込む。 */
+function setCapture(state, D, subject, value) {
+  const cur = state.capture[D];
+  const obj = (cur === 'none' || cur === 'added') ? { '*': cur } : (cur && typeof cur === 'object' ? { ...cur } : {});
+  if (subject === '*') obj['*'] = value; else if (value) obj[subject] = value; else delete obj[subject];
+  state.capture[D] = obj;
+}
+function captureRows(unanswered) {
   const rows = [];
-  for (let r = 0; r < subjects.length; r += 5) rows.push({ type: 1, components: subjects.slice(r, r + 5).map((sub) => ({ type: 2, style: 2, label: sub, custom_id: 'cap:' + sub })) });
-  rows.push({ type: 1, components: [{ type: 2, style: 3, label: more ? 'これで全部' : 'きょうは なし', custom_id: more ? 'capdone' : 'capnone' }] });
+  const caps = [];
+  unanswered.forEach((sub) => { caps.push({ type: 2, style: 2, label: `${sub}：出た`, custom_id: 'cap:' + sub }); caps.push({ type: 2, style: 2, label: `${sub}：なし`, custom_id: 'capno:' + sub }); });
+  for (let r = 0; r < caps.length && rows.length < 4; r += 5) rows.push({ type: 1, components: caps.slice(r, r + 5) });
+  if (unanswered.length) rows.push({ type: 1, components: [{ type: 2, style: 2, label: unanswered.length > 1 ? 'のこりは ぜんぶ なし' : 'これで全部', custom_id: 'capnone' }] });
   return rows;
 }
 function modalValues(interaction) {
@@ -115,6 +125,12 @@ export async function handleInteraction(interaction, ctx) {
   const stamp = now2(lp.local);
   const live = state.items.filter((i) => !i.deleted);
   const touch = (i) => { i.updatedAt = (ctx.now || new Date()).toISOString(); return i; };
+  state.nudge.lastInteractionAt = (ctx.now || new Date()).toISOString();
+  const emit = (ev) => { if (Array.isArray(ctx.events)) ctx.events.push(ev); };
+  const newItem = (subject, range, where, due) => {
+    const nowIso = (ctx.now || new Date()).toISOString();
+    return { id: 'hw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), subject, range, rangeMissing: !range, where, location: /classroom|タブレット/i.test(where) ? 'online' : (where ? 'bag' : null), submitTo: '', due, done: false, packed: false, createdAt: nowIso, createdOn: D, updatedAt: nowIso };
+  };
 
   if (interaction.type === 2) {
     const name = interaction.data && interaction.data.name;
@@ -122,14 +138,11 @@ export async function handleInteraction(interaction, ctx) {
       const o = optionMap(interaction);
       const range = String(o.hani || '').trim();
       if (!range) return ephemeral('範囲だけは書いて！（例：p.24〜27）');
-      let due = null;
-      if (o.hizuke && /^\d{4}-\d{2}-\d{2}$/.test(o.hizuke)) due = o.hizuke;
-      else if (o.itsu && /^\+\d+$/.test(o.itsu)) due = toISO(addDays(parseDate(D), +o.itsu.slice(1)));
-      else due = toISO(addDays(parseDate(D), 1));
-      const nowIso = (ctx.now || new Date()).toISOString();
-      const item = { id: 'hw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), subject: o.kamoku || 'その他', range, where: String(o.doko || '').trim(), submitTo: '', due, done: false, packed: false, createdAt: nowIso, updatedAt: nowIso };
+      const subject = o.kamoku || 'その他';
+      const due = parseDueWords(o.hizuke || o.itsu || '', D, { subject, timetable: s.timetable, schoolDays: s.schoolDays });
+      const item = newItem(subject, range, String(o.doko || '').trim(), due);
       state.items.push(item);
-      state.capture[D] = 'added';
+      setCapture(state, D, subject, 'added');
       await ctx.save(state);
       const d = parseDate(due);
       return reply({
@@ -150,33 +163,69 @@ export async function handleInteraction(interaction, ctx) {
     const ids = (arg || '').split(',').filter(Boolean);
     if (action === 'cap') {
       const subject = arg || 'その他';
+      const n = nextLesson(subject, D, s.timetable, s.schoolDays);
+      const defLabel = n.lesson ? `次の${subject}（${n.date.getMonth() + 1}/${n.date.getDate()}）` : `次の学校の日（${n.date.getMonth() + 1}/${n.date.getDate()}）`;
       return {
         type: 9,
         data: {
           custom_id: 'capmodal:' + subject,
           title: `${subject} の宿題`,
           components: [
-            { type: 1, components: [{ type: 4, custom_id: 'hani', label: '範囲（p.24〜27、プリント1枚 など）', style: 1, required: true, max_length: 100 }] },
+            { type: 1, components: [{ type: 4, custom_id: 'hani', label: '範囲（空でもいい。夜に聞く）', style: 1, required: false, max_length: 100, placeholder: 'p.24〜27、プリント1枚 など' }] },
             { type: 1, components: [{ type: 4, custom_id: 'doko', label: 'どこにある？（教科書、プリント、Classroom…）', style: 1, required: false, max_length: 100 }] },
-            { type: 1, components: [{ type: 4, custom_id: 'itsu', label: 'いつまで？（あした／あさって／来週／10-14）', style: 1, required: false, value: 'あした', max_length: 20 }] }
+            { type: 1, components: [{ type: 4, custom_id: 'itsu', label: 'いつまで？（次／あした／来週／10-14）', style: 1, required: false, value: '次', placeholder: defLabel, max_length: 20 }] }
           ]
         }
       };
     }
-    if (action === 'capnone' || action === 'capdone') {
-      const already = captureAnswered({ items: live, capture: state.capture, today: D });
-      state.capture[D] = already === 'added' ? 'added' : 'none';
+    if (action === 'capno') {
+      const subject = arg || 'その他';
+      setCapture(state, D, subject, 'none');
       await ctx.save(state);
-      const tail = state.capture[D] === 'added' ? `これで全部。OK（${stamp}）。` : `きょうは宿題なし。OK（${stamp}）。`;
+      const cst = captureStatus({ items: live, capture: state.capture, today: D, timetable: s.timetable });
+      const tail = cst.all ? (cst.anyAdded ? `${subject} はなし。これで全部。OK（${stamp}）。` : `${subject} はなし。きょうは宿題なし。OK（${stamp}）。`) : `${subject} はなし。のこり：${cst.unanswered.join('・')}`;
+      return update({ content: `${msg.content || ''}\n${tail}`.trim(), embeds: msg.embeds || [], components: cst.all ? [] : captureRows(cst.unanswered) });
+    }
+    if (action === 'capnone' || action === 'capdone') {
+      const before = captureStatus({ items: live, capture: state.capture, today: D, timetable: s.timetable });
+      for (const sub of before.unanswered) setCapture(state, D, sub, 'none');
+      await ctx.save(state);
+      const tail = before.anyAdded ? `これで全部。OK（${stamp}）。` : `きょうは宿題なし。OK（${stamp}）。`;
       return update({ content: `${msg.content || ''}\n${tail}`.trim(), embeds: msg.embeds || [], components: [] });
+    }
+    if (action === 'capreopen') {
+      const cur = state.capture[D];
+      if (cur && typeof cur === 'object') { for (const k of Object.keys(cur)) if (cur[k] === 'none') delete cur[k]; } else if (cur === 'none') delete state.capture[D];
+      await ctx.save(state);
+      const cst = captureStatus({ items: live, capture: state.capture, today: D, timetable: s.timetable });
+      return update({ content: `${msg.content || ''}\nやっぱりあった。どの科目？`.trim(), embeds: msg.embeds || [], components: captureRows(cst.unanswered) });
+    }
+    if (action === 'submit' || action === 'drop') {
+      const hit = live.filter((i) => ids.includes(i.id) && isActive(i));
+      for (const i of hit) { if (action === 'submit') { i.submitted = true; i.submittedAt = (ctx.now || new Date()).toISOString(); } else { i.dropped = true; i.droppedAt = (ctx.now || new Date()).toISOString(); } touch(i); }
+      await ctx.save(state);
+      if (action === 'submit') for (const i of hit) emit({ type: 'submitted', text: `出した：${i.subject} ${i.range || ''}（${stamp}）` });
+      const left = ((msg.components && msg.components[0] && msg.components[0].components) || []).filter((b) => !ids.some((id) => (b.custom_id || '').endsWith(':' + id)));
+      const tail = action === 'submit' ? `出した（${stamp}）。えらい。` : `先生に言った（${stamp}）。これで終わり。`;
+      return update({ content: `${msg.content || ''}\n${tail}`.trim(), embeds: msg.embeds || [], components: left.length ? [{ type: 1, components: left }] : [] });
+    }
+    if (action === 'fix') {
+      const item = live.find((i) => i.id === arg);
+      if (!item) return ephemeral('その宿題はもうない。');
+      return { type: 9, data: { custom_id: 'fixmodal:' + item.id, title: `${item.subject} の範囲`, components: [
+        { type: 1, components: [{ type: 4, custom_id: 'hani', label: '範囲（p.24〜27、プリント1枚 など）', style: 1, required: true, max_length: 100, value: item.range || '' }] },
+        { type: 1, components: [{ type: 4, custom_id: 'doko', label: 'どこにある？', style: 1, required: false, max_length: 100, value: item.where || '' }] }
+      ] } };
     }
     if (action === 'pack') {
       let n = 0;
-      for (const i of live) if (ids.includes(i.id) && !i.packed) { i.packed = true; i.packedAt = (ctx.now || new Date()).toISOString(); touch(i); n++; }
+      for (const i of live) if (ids.includes(i.id) && !(i.packed && i.packedOn === D)) { i.packed = true; i.packedAt = (ctx.now || new Date()).toISOString(); i.packedOn = D; touch(i); n++; }
       await ctx.save(state);
       const left = nudgeStage({ items: state.items.filter((i) => !i.deleted), today: D, now: lp.local, leaveAt: s.leaveAt });
       const tail = left.stage === 'clear' ? `入れた（${stamp}）。いってらっしゃい！` : `入れた（${stamp}）。あと ${left.items.length} つ。`;
-      return update({ content: `${msg.content || ''}\n${tail}`.trim(), embeds: msg.embeds || [], components: [] });
+      if (left.stage === 'clear') emit({ type: 'packed_all', text: `ぜんぶ入れた（${stamp}）。いってらっしゃい！` });
+      const rest = ((msg.components && msg.components[0] && msg.components[0].components) || []).filter((b) => /^pack:/.test(b.custom_id || '') && !ids.some((id) => b.custom_id === 'pack:' + id));
+      return update({ content: `${msg.content || ''}\n${tail}`.trim(), embeds: msg.embeds || [], components: left.stage === 'clear' || !rest.length ? [] : [{ type: 1, components: rest }] });
     }
     if (action === 'done') {
       for (const i of live) if (ids.includes(i.id)) { i.done = true; touch(i); }
@@ -202,18 +251,29 @@ export async function handleInteraction(interaction, ctx) {
       const subject = cid.slice('capmodal:'.length) || 'その他';
       const v = modalValues(interaction);
       const range = String(v.hani || '').trim();
-      if (!range) return ephemeral('範囲だけは書いて！（例：p.24〜27）');
-      const due = parseDueWords(v.itsu, D);
-      const nowIso = (ctx.now || new Date()).toISOString();
-      const item = { id: 'hw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), subject, range, where: String(v.doko || '').trim(), submitTo: '', due, done: false, packed: false, createdAt: nowIso, updatedAt: nowIso };
+      const due = parseDueWords(v.itsu, D, { subject, timetable: s.timetable, schoolDays: s.schoolDays });
+      const item = newItem(subject, range, String(v.doko || '').trim(), due);
       state.items.push(item);
-      state.capture[D] = 'added';
+      setCapture(state, D, subject, 'added');
       await ctx.save(state);
       const d = parseDate(due);
+      const cst = captureStatus({ items: state.items.filter((i) => !i.deleted), capture: state.capture, today: D, timetable: s.timetable });
       return reply({
-        content: `登録した：${subject}　${range}　｜　${item.where ? 'どこ：' + item.where : 'どこ：まだ書いてない'}　｜　${d.getMonth() + 1}/${d.getDate()} まで。ほかの科目は？`,
-        components: captureRows(captureSubjects({ today: D, timetable: s.timetable }), true)
+        content: `登録した：${subject}　${range || '（範囲はあとで。夜に聞く）'}　｜　${item.where ? 'どこ：' + item.where : 'どこ：まだ書いてない'}　｜　${d.getMonth() + 1}/${d.getDate()} まで。` + (cst.all ? ' これで全部。' : ` ほかは？ のこり：${cst.unanswered.join('・')}`),
+        components: cst.all ? [] : captureRows(cst.unanswered)
       });
+    }
+    if (cid.startsWith('fixmodal:')) {
+      const item = live.find((i) => i.id === cid.slice('fixmodal:'.length));
+      if (!item) return ephemeral('その宿題はもうない。');
+      const v = modalValues(interaction);
+      const range = String(v.hani || '').trim();
+      if (!range) return ephemeral('範囲だけは書いて！（例：p.24〜27）');
+      item.range = range; item.rangeMissing = false;
+      if (String(v.doko || '').trim()) item.where = String(v.doko).trim();
+      touch(item);
+      await ctx.save(state);
+      return reply({ content: `書いた：${item.subject}　${item.range}　｜　${item.where ? 'どこ：' + item.where : 'どこ：まだ書いてない'}（${stamp}）` });
     }
     return ephemeral('そのフォームは知らない。');
   }
