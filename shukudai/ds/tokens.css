@@ -1,0 +1,91 @@
+/* 宿題忘れゼロ — generated from tokens.json */
+:root, [data-theme="light"] {
+  --ground: #ffffff;
+  --surface: #ffffff;
+  --surface-soft: #f2f2f2;
+  --ink: #111111;
+  --ink-soft: #3d3d3d;
+  --muted: #5f5f5f;
+  --line: #dcdcdc;
+  --line-strong: #6e6e6e;
+  --accent: #ff8fc5;
+  --on-accent: #111111;
+  --accent-ink: #c81e6a;
+  --accent-soft: #ffe1ef;
+  --due-overdue: var(--ground);
+  --due-overdue-fill: var(--ink);
+  --due-today: var(--on-accent);
+  --due-today-fill: var(--accent);
+  --due-soon: var(--ink);
+  --due-soon-fill: var(--accent-soft);
+  --due-later: var(--muted);
+  --due-later-fill: var(--surface-soft);
+  --done: var(--muted);
+  --done-fill: var(--surface-soft);
+  --focus: var(--accent-ink);
+  --shadow-soft: 0 4px 12px #0000001f;
+  --shadow-lift: 0 10px 24px #00000024;
+  --shadow-float: 0 16px 40px #00000029;
+}
+[data-theme="dark"] {
+  --ground: #0f0f0f;
+  --surface: #1b1b1b;
+  --surface-soft: #2a2a2a;
+  --ink: #f5f5f5;
+  --ink-soft: #d9d9d9;
+  --muted: #b0b0b0;
+  --line: #3b3b3b;
+  --line-strong: #8c8c8c;
+  --accent: #ff8fc5;
+  --on-accent: #111111;
+  --accent-ink: #ff8fc5;
+  --accent-soft: #4a2238;
+  --due-overdue: var(--ground);
+  --due-overdue-fill: var(--ink);
+  --due-today: var(--on-accent);
+  --due-today-fill: var(--accent);
+  --due-soon: var(--ink);
+  --due-soon-fill: var(--accent-soft);
+  --due-later: var(--muted);
+  --due-later-fill: var(--surface-soft);
+  --done: var(--muted);
+  --done-fill: var(--surface-soft);
+  --focus: var(--accent);
+  --shadow-soft: 0 4px 12px #00000066;
+  --shadow-lift: 0 10px 24px #00000080;
+  --shadow-float: 0 16px 40px #00000099;
+}
+:root {
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+  --radius-sm: 12px;
+  --radius-md: 20px;
+  --radius-lg: 28px;
+  --radius-xl: 40px;
+  --radius-pill: 999px;
+  --tap-min: 48px;
+  --tap-primary: 64px;
+  --icon: 24px;
+  --icon-lg: 40px;
+  --border: 2px;
+  --content-max: 520px;
+  --font-display: "Dela Gothic One", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", sans-serif;
+  --font-sans: "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", "BIZ UDPGothic", sans-serif;
+  --font-mono: "DM Mono", "Zen Kaku Gothic New", "Hiragino Kaku Gothic ProN", monospace;
+}
+.display { font-family: var(--font-display); font-size: 36px; line-height: 44px; font-weight: 400; letter-spacing: -0.01em; }
+.numeral { font-family: var(--font-display); font-size: 64px; line-height: 64px; font-weight: 400; letter-spacing: 0; }
+.title { font-family: var(--font-display); font-size: 24px; line-height: 32px; font-weight: 400; letter-spacing: 0; }
+.button { font-family: var(--font-display); font-size: 18px; line-height: 26px; font-weight: 400; letter-spacing: 0.02em; }
+.heading { font-family: var(--font-sans); font-size: 18px; line-height: 26px; font-weight: 700; }
+.body { font-family: var(--font-sans); font-size: 16px; line-height: 24px; font-weight: 500; }
+.body-strong { font-family: var(--font-sans); font-size: 16px; line-height: 24px; font-weight: 700; }
+.chip { font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 700; letter-spacing: 0.02em; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.12em; }
+.caption { font-family: var(--font-mono); font-size: 13px; line-height: 18px; font-weight: 500; letter-spacing: 0.02em; }

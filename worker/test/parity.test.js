@@ -1,0 +1,49 @@
+// ブラウザの bundle.js とサーバーの core.js が同じ答えを出すことを確かめる。
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import * as core from '../src/core.js';
+import { items } from './helpers.js';
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const src = fs.readFileSync(path.join(here, '..', '..', 'shukudai', 'ds', 'bundle.js'), 'utf8');
+const stub = () => new Proxy({}, { get: (t, k) => (k === 'classList' ? { add() {}, remove() {}, toggle() {}, contains() { return false; } } : k === 'style' ? {} : () => stub()) });
+const win = {};
+const doc = { createElement: stub, createElementNS: stub, createTextNode: stub };
+new Function('window', 'document', src)(win, doc);
+const S = win.Shukudai;
+
+test('dueInfo agrees', () => {
+  for (const due of ['2026-10-07', '2026-10-09', '2026-10-10', '2026-10-11', '2026-10-20']) {
+    for (const done of [false, true]) assert.deepEqual(core.dueInfo(due, '2026-10-09', done), S.dueInfo(due, '2026-10-09', done));
+  }
+});
+
+test('nudgeStage agrees', () => {
+  for (const now of ['2026-10-09T06:20', '2026-10-09T07:15', '2026-10-09T07:42', '2026-10-09T08:05']) {
+    const a = core.nudgeStage({ items: items(), now, leaveAt: '07:50' });
+    const b = S.nudgeStage({ items: items(), now, leaveAt: '07:50' });
+    assert.deepEqual({ ...a, items: a.items.map((i) => i.id) }, { ...b, items: b.items.map((i) => i.id) });
+  }
+});
+
+test('captureAnswered / captureSubjects agree', () => {
+  assert.equal(core.captureAnswered({ items: items(), today: '2026-10-08' }), S.captureAnswered({ items: items(), today: '2026-10-08' }));
+  assert.equal(core.captureAnswered({ items: items(), today: '2026-10-09', capture: { '2026-10-09': 'none' } }), 'none');
+  assert.deepEqual(core.captureSubjects({ today: '2026-10-09', timetable: { 5: ['数学'] } }), S.captureSubjects({ today: '2026-10-09', timetable: { 5: ['数学'] } }));
+});
+
+test('discordPayload agrees', () => {
+  const cases = [
+    { kind: 'evening', items: items(), now: '2026-10-08T20:00', today: '2026-10-08', userId: '123' },
+    { kind: 'morning', items: items(), now: '2026-10-09T07:42', leaveAt: '07:50', userId: '123', appUrl: 'https://x.invalid' },
+    { kind: 'morning', items: items(), now: '2026-10-09T08:05', leaveAt: '07:50', userId: '123' },
+    { kind: 'overdue', items: items(), now: '2026-10-09T19:00', userId: '123' },
+    { kind: 'capture', items: items(), now: '2026-10-09T15:45', today: '2026-10-09', userId: '123', appUrl: 'https://x.invalid', askNo: 3 },
+    { kind: 'capture', items: items(), now: '2026-10-09T15:45', today: '2026-10-09', timetable: { 5: ['数学', '英語'] } },
+    { kind: 'evening', items: items(), now: '2026-10-09T20:00', today: '2026-10-09', captureMissing: true }
+  ];
+  for (const c of cases) assert.deepEqual(core.discordPayload(c), S.discordPayload(c));
+});

@@ -1,0 +1,68 @@
+/* 宿題忘れゼロ — 画面の組み立て。部品の見た目は ds/bundle.css、色と文字は ds/tokens.css。 */
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body {
+  background: var(--ground); color: var(--ink);
+  font-family: var(--font-sans); font-size: 16px; line-height: 24px; font-weight: 500;
+  -webkit-text-size-adjust: 100%;
+}
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
+
+.app {
+  max-width: var(--content-max); margin: 0 auto;
+  padding: var(--space-4) var(--space-4) calc(var(--space-8) + var(--space-7) + env(safe-area-inset-bottom));
+  display: flex; flex-direction: column; gap: var(--space-4);
+}
+
+/* ヘッダー：名前は display、日付は mono、右に 2 つの丸ボタン */
+.top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-2); }
+.brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.brand__mark { flex: none; width: 36px; height: 36px; border-radius: 10px; }
+.brand__name { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 32px; font-weight: 400; letter-spacing: -.01em; }
+.brand__date { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .02em; color: var(--muted); }
+.top__actions { display: flex; gap: var(--space-2); flex: none; }
+
+.section-label { margin: var(--space-2) 0 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
+.list { display: flex; flex-direction: column; gap: var(--space-3); }
+.empty { margin: 0; color: var(--muted); font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .02em; }
+.offline { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; letter-spacing: .04em; color: var(--muted); }
+
+/* 下に固定の主ボタン */
+.fab { position: fixed; left: 0; right: 0; bottom: 0; z-index: 5; display: flex; justify-content: center; padding: var(--space-3) var(--space-4) calc(var(--space-4) + env(safe-area-inset-bottom)); pointer-events: none; }
+.fab > * { pointer-events: auto; width: 100%; max-width: var(--content-max); }
+
+/* ボトムシート */
+.sheet-backdrop { position: fixed; inset: 0; z-index: 10; background: #11111199; display: flex; align-items: flex-end; justify-content: center; }
+.sheet { width: 100%; max-width: var(--content-max); max-height: 94vh; overflow: auto; overscroll-behavior: contain; }
+.sheet > .sk-quick, .sheet > .panel { padding-bottom: calc(var(--space-6) + env(safe-area-inset-bottom)); }
+.panel {
+  display: flex; flex-direction: column; gap: var(--space-5);
+  padding: var(--space-5) var(--space-4) var(--space-6);
+  border: var(--border) solid var(--ink); border-bottom: 0;
+  border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  background: var(--surface); color: var(--ink); box-shadow: var(--shadow-float);
+}
+.panel__head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.panel__title { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 32px; font-weight: 400; }
+.panel .sk-bring { border: 0; padding: 0; box-shadow: none; }
+.panel__actions { display: flex; flex-direction: column; gap: var(--space-2); }
+.panel__note { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .02em; color: var(--muted); }
+.panel__status { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .02em; color: var(--accent-ink); }
+.row { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+
+/* 5 秒の「もどす」 */
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 20;
+  bottom: calc(var(--tap-primary) + var(--space-7) + env(safe-area-inset-bottom));
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+  border-radius: var(--radius-pill); background: var(--ink); color: var(--ground);
+  font-weight: 700; white-space: nowrap; box-shadow: var(--shadow-float);
+}
+.toast .sk-btn--ghost { color: var(--accent); min-height: 40px; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .sheet { animation: rise .16s ease-out; }
+  @keyframes rise { from { transform: translateY(24px); opacity: .6; } to { transform: none; opacity: 1; } }
+}

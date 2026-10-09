@@ -1,0 +1,15 @@
+{
+  "name": "shukudai-worker",
+  "private": true,
+  "type": "module",
+  "description": "宿題忘れゼロ — Discord で焦らせるサーバー（Cloudflare Workers）",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\"",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --test-scheduled",
+    "register": "node scripts/register-commands.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^3.90.0"
+  }
+}

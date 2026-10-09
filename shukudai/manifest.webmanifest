@@ -1,0 +1,20 @@
+{
+  "name": "宿題忘れゼロ",
+  "short_name": "宿題",
+  "description": "メモらなくても、忘れない。当日の朝でも、持っていける。",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#ffffff",
+  "theme_color": "#111111",
+  "shortcuts": [
+    { "name": "宿題を追加", "short_name": "追加", "url": "./?add=1", "icons": [{ "src": "icons/icon-192.png", "sizes": "192x192" }] }
+  ],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
