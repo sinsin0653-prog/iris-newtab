@@ -15,12 +15,12 @@ body {
 }
 
 /* ヘッダー：名前は display、日付は mono、右に 2 つの丸ボタン */
-.top { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); padding-top: var(--space-2); }
+.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); padding-top: var(--space-2); }
 .brand { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .brand__mark { flex: none; width: 36px; height: 36px; border-radius: 10px; }
-.brand__name { margin: 0; font-family: var(--font-display); font-size: 24px; line-height: 32px; font-weight: 400; letter-spacing: -.01em; }
-.brand__date { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .02em; color: var(--muted); }
-.top__actions { display: flex; gap: var(--space-2); flex: none; align-items: center; }
+.brand__name { margin: 0; font-family: var(--font-display); font-size: 22px; line-height: 30px; font-weight: 400; letter-spacing: -.01em; white-space: nowrap; }
+.brand__date { margin: 0; font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .02em; color: var(--muted); white-space: nowrap; }
+.top__actions { display: flex; gap: var(--space-2); flex: none; align-items: center; margin-left: auto; }
 .sk-pill { display: inline-flex; align-items: center; min-height: var(--tap-min); padding: 0 var(--space-3); border: var(--border) solid var(--ink); border-radius: var(--radius-pill); background: var(--surface); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 700; cursor: pointer; }
 .draft { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: var(--tap-min); padding: var(--space-2) var(--space-4); border: var(--border) dashed var(--line-strong); border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--ink); font: inherit; font-weight: 700; text-align: left; cursor: pointer; }
 .draft__go { margin-left: auto; font-family: var(--font-mono); font-size: 12px; letter-spacing: .08em; color: var(--accent-ink); }
