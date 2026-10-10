@@ -827,7 +827,11 @@ async function verifyDiscordRequest(request, publicKeyHex) {
 
 /** Bot として送る。 */
 class DiscordRest {
-  constructor(token, fetchImpl = globalThis.fetch) { this.token = token; this.fetch = fetchImpl; }
+  constructor(token, fetchImpl = globalThis.fetch) {
+    this.token = token;
+    // this.fetch(...) と呼ぶと Cloudflare では Illegal invocation になるので、素の関数として呼ぶ。
+    this.fetch = (url, init) => fetchImpl(url, init);
+  }
   async call(method, path, body) {
     const res = await this.fetch(`${API}${path}`, {
       method,

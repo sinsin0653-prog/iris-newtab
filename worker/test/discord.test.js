@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { verifyDiscordRequest, handleInteraction, COMMANDS } from '../src/discord.js';
+import { verifyDiscordRequest, handleInteraction, DiscordRest, COMMANDS } from '../src/discord.js';
 import { jst, stateWith } from './helpers.js';
 
 const toHex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -184,4 +184,19 @@ test('due words are understood', async () => {
   assert.equal(parseDueWords('なんか', '2026-10-09'), '2026-10-12');
   assert.equal(parseDueWords('次', '2026-10-09', { subject: '数学', timetable: { 2: ['数学'] } }), '2026-10-13', '次の数学は火曜');
   assert.equal(parseDueWords('', '2026-10-09', { schoolDays: [1, 2, 3, 4, 5, 6] }), '2026-10-10', '土曜も学校なら土曜');
+});
+
+// Cloudflare の fetch は「this が別のオブジェクト」で呼ばれると Illegal invocation で落ちる。
+test('DiscordRest: fetch を this つきで呼ばない（Cloudflare の Illegal invocation 対策）', async () => {
+  const calls = [];
+  function strictFetch(url, init) {
+    if (this !== undefined && this !== globalThis) throw new TypeError('Illegal invocation: function called with incorrect `this` reference.');
+    calls.push({ url, init });
+    return Promise.resolve(new Response(JSON.stringify({ id: '42' }), { status: 200 }));
+  }
+  const rest = new DiscordRest('tok', strictFetch);
+  await rest.dm('123456789012345678', { content: 'hi' });
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/users\/@me\/channels$/);
+  assert.match(calls[1].url, /\/channels\/42\/messages$/);
 });
