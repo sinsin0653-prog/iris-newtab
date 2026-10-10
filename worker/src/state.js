@@ -73,7 +73,7 @@ export function mergeState(server, incoming) {
   return {
     v: 1,
     items: mergeItems(s.items, c.items),
-    settings: settingsNewer ? { ...c.settings, discord: { ...c.settings.discord }, watch: { ...c.settings.watch } } : s.settings,
+    settings: settingsNewer ? { ...c.settings, discord: { ...c.settings.discord, userId: c.settings.discord.userId || s.settings.discord.userId || null, watchChannelId: c.settings.discord.watchChannelId || s.settings.discord.watchChannelId || null }, watch: { ...c.settings.watch } } : s.settings,
     nudge: mergeNudge(s.nudge, c.nudge),
     capture: mergeCapture(s.capture, c.capture),
     updatedAt: new Date().toISOString()

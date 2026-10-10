@@ -1,6 +1,7 @@
 // 宿題忘れゼロ — Cloudflare Worker。アプリとの同期 API、Discord の Interactions、5 分おきの催促。
 import { planNudges } from './scheduler.js';
-import { verifyDiscordRequest, handleInteraction, DiscordRest } from './discord.js';
+import { verifyDiscordRequest, handleInteraction, DiscordRest, COMMANDS } from './discord.js';
+import { SETUP_HTML } from './setup-page.js';
 import { withDefaults, mergeState, emptyState } from './state.js';
 import { nudgeStage, dayPlan } from './core.js';
 import { localParts } from './scheduler.js';
@@ -76,13 +77,59 @@ export default {
       }
     }
 
-    if (url.pathname === '/') return new Response('shukudai worker ok', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+    // ブラウザだけで準備するためのページと、その裏の API
+    if (url.pathname === '/setup' && request.method === 'GET') {
+      return new Response(SETUP_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Content-Security-Policy': "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'", 'Referrer-Policy': 'no-referrer' } });
+    }
+    if (url.pathname === '/api/health' && request.method === 'GET') {
+      // 何が入っているか（あるか・ないかだけ。中身は返さない）
+      let kv = false, lastRunAt = null, userIdSaved = false;
+      try {
+        if (env.SHUKUDAI) { const st = await loadState(env); kv = true; lastRunAt = st.nudge.lastRunAt || null; userIdSaved = !!st.settings.discord.userId; }
+      } catch { kv = false; }
+      return json(env, { ok: true, checks: { DISCORD_TOKEN: !!env.DISCORD_TOKEN, DISCORD_PUBLIC_KEY: !!env.DISCORD_PUBLIC_KEY, DISCORD_APP_ID: !!env.DISCORD_APP_ID, SYNC_TOKEN: !!env.SYNC_TOKEN, KV: kv }, userIdSaved, lastRunAt, interactionsUrl: url.origin + '/interactions' });
+    }
+    if (url.pathname === '/api/setup' && request.method === 'POST') {
+      if (!env.SYNC_TOKEN) return json(env, { error: 'SYNC_TOKEN（合言葉）がまだ Worker に入っていない' }, 400);
+      if (!authorized(request, env)) return json(env, { error: '合言葉がちがう（SYNC_TOKEN に入れたものと同じにする）' }, 401);
+      if (!env.SHUKUDAI) return json(env, { error: 'KV（SHUKUDAI）がまだつながっていない' }, 400);
+      let body = {};
+      try { body = await request.json(); } catch { body = {}; }
+      const out = { saved: false, registered: null, dm: false, errors: [] };
+      const state = await loadState(env);
+      const userId = String(body.userId || '').trim();
+      if (userId) {
+        if (!/^\d{15,22}$/.test(userId)) out.errors.push('ユーザー ID は 17〜20 桁くらいの数字だけ');
+        else { state.settings.discord = { ...state.settings.discord, userId }; await saveState(env, state); out.saved = true; }
+      }
+      if (!env.DISCORD_TOKEN) { out.errors.push('DISCORD_TOKEN（Bot のトークン）がまだ入っていない'); return json(env, out); }
+      const rest = new DiscordRest(env.DISCORD_TOKEN);
+      if (body.register !== false) {
+        if (!env.DISCORD_APP_ID) out.errors.push('DISCORD_APP_ID（Application ID）がまだ入っていない');
+        else {
+          try { const r = await rest.call('PUT', `/applications/${env.DISCORD_APP_ID}/commands`, COMMANDS); out.registered = Array.isArray(r) ? r.map((c) => '/' + c.name) : []; }
+          catch (e) { out.errors.push('コマンド登録：' + explainDiscord(e)); }
+        }
+      }
+      if (body.test !== false) {
+        const uid = state.settings.discord.userId;
+        if (!uid) out.errors.push('ユーザー ID がまだない（上の欄に入れる）');
+        else {
+          try { await rest.dm(uid, { content: 'つながった！ここに催促が来る。', embeds: [{ title: '宿題忘れゼロ', description: 'テスト送信。放課後の「課題出た？」も、朝の「出るまであと〇分」も、ここに来る。', color: 0xff8fc5 }] }); out.dm = true; }
+          catch (e) { out.errors.push('テスト DM：' + explainDiscord(e)); }
+        }
+      }
+      return json(env, out);
+    }
+
+    if (url.pathname === '/') return new Response('shukudai worker ok\n準備は /setup を開く', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     return json(env, { error: 'not found' }, 404);
   },
 
   async scheduled(event, env, ctx) {
     const state = await loadState(env);
     const { actions, state: next } = planNudges({ state, now: new Date(event.scheduledTime || Date.now()) });
+    next.nudge.lastRunAt = new Date().toISOString(); // /setup で「見回っているか」を見せる
     await saveState(env, next);
     if (!actions.length) return;
     const userId = next.settings.discord.userId;
@@ -111,4 +158,15 @@ async function postGoodNews(env, state, events) {
   for (const ev of events) {
     try { await rest.send(watch, { content: ev.text, allowed_mentions: { users: [] } }); } catch (e) { console.error('good news failed', String(e.message || e)); }
   }
+}
+
+/** Discord のエラーを、何を直せばいいかの言葉にする。 */
+function explainDiscord(e) {
+  const msg = String((e && e.message) || e);
+  if (/→ 401/.test(msg)) return 'Bot のトークンがちがう。Developer Portal の Bot タブで Reset Token して、DISCORD_TOKEN に入れ直す';
+  if (/"code":\s*50007/.test(msg)) return 'DM を送れない。Bot と同じサーバーにいるか、そのサーバーの「プライバシー設定」で「ダイレクトメッセージ」を許可しているか見る';
+  if (/"code":\s*10013/.test(msg)) return 'そのユーザー ID の人が見つからない。ID をコピーし直す';
+  if (/"code":\s*10002/.test(msg) || /→ 404/.test(msg)) return 'Application ID がちがう（DISCORD_APP_ID）';
+  if (/→ 403/.test(msg)) return 'Bot に権限がない。招待し直す';
+  return msg.slice(0, 200);
 }

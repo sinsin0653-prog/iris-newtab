@@ -56,6 +56,9 @@ async function doPull() {
     if (remote && Array.isArray(remote.items)) {
       state.items = mergeItems(state.items, remote.items);
       state.capture = mergeCapture(state.capture, remote.capture);
+      // サーバーの準備ページ（/setup）で入れた Discord ユーザー ID を、アプリの設定にも映す
+      const rid = remote.settings && remote.settings.discord && remote.settings.discord.userId;
+      if (rid && !state.settings.discord.userId) state.settings.discord = { ...state.settings.discord, userId: rid };
       save({ push: false });
       ui.lastPull = Date.now();
       setStatus('同期した ' + clock());
