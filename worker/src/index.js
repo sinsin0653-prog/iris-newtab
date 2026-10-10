@@ -2,7 +2,7 @@
 import { planNudges } from './scheduler.js';
 import { verifyDiscordRequest, handleInteraction, DiscordRest } from './discord.js';
 import { withDefaults, mergeState, emptyState } from './state.js';
-import { nudgeStage } from './core.js';
+import { nudgeStage, dayPlan } from './core.js';
 import { localParts } from './scheduler.js';
 
 const KEY = 'state';
@@ -55,8 +55,9 @@ export default {
         await saveState(env, merged);
         // アプリ側で全部「かばんに入れた」になったら、良い知らせを見守りチャンネルへ
         const lp = localParts(new Date(), merged.settings.tz);
-        const was = nudgeStage({ items: before.items, today: lp.dateKey, now: lp.local, leaveAt: before.settings.leaveAt });
-        const is = nudgeStage({ items: merged.items, today: lp.dateKey, now: lp.local, leaveAt: merged.settings.leaveAt });
+        const leaveOf = (st) => dayPlan(lp.local.getDay(), st.settings).leaveAt || st.settings.leaveAt;
+        const was = nudgeStage({ items: before.items, today: lp.dateKey, now: lp.local, leaveAt: leaveOf(before) });
+        const is = nudgeStage({ items: merged.items, today: lp.dateKey, now: lp.local, leaveAt: leaveOf(merged) });
         if (was.stage !== 'clear' && is.stage === 'clear' && was.items.length) ctx.waitUntil(postGoodNews(env, merged, [{ type: 'packed_all', text: `ぜんぶ入れた（${String(lp.h).padStart(2, '0')}:${String(lp.mi).padStart(2, '0')}）。いってらっしゃい！` }]));
         return json(env, merged);
       }

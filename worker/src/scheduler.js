@@ -1,5 +1,5 @@
 // はしごを上る係。5 分おきに呼ばれ、「いま送るべき催促」を決める。送るのは index.js。
-import { discordPayload, nudgeStage, dueInfo, parseDate, addDays, hhmmToMinutes, captureStatus, isActive, isPackedToday } from './core.js';
+import { discordPayload, nudgeStage, dueInfo, parseDate, addDays, hhmmToMinutes, captureStatus, isActive, isPackedToday, dayPlan, daySubjects, effectiveTimetable } from './core.js';
 import { withDefaults } from './state.js';
 
 /** UTC の Date を、設定のタイムゾーンの「壁時計」に直す。local は getHours() などがその壁時計を返す Date。 */
@@ -18,11 +18,12 @@ export function inQuietHours(minutes, settings) {
   return from > to ? (minutes >= from || minutes < to) : (minutes >= from && minutes < to);
 }
 
+// 朝のはしご。leave = その日の出る時間（分）、wake = 1 通目（履修科目があれば出る 60 分前、なければ設定の起きる時間）
 const LADDER = [
-  { name: 'wake', at: (s) => hhmmToMinutes(s.wakeAt), snoozable: true, fresh: 20 },
-  { name: 'soon', at: (s) => hhmmToMinutes(s.leaveAt) - 30, snoozable: true, fresh: 20 },
-  { name: 'urgent', at: (s) => hhmmToMinutes(s.leaveAt) - 15, snoozable: false, fresh: 20 },
-  ...[0, 1, 2, 3, 4, 5].map((k) => ({ name: `late${k}`, at: (s) => hhmmToMinutes(s.leaveAt) + 10 * k, snoozable: false, fresh: 60 }))
+  { name: 'wake', at: (leave, wake) => wake, snoozable: true, fresh: 20 },
+  { name: 'soon', at: (leave) => leave - 30, snoozable: true, fresh: 20 },
+  { name: 'urgent', at: (leave) => leave - 15, snoozable: false, fresh: 20 },
+  ...[0, 1, 2, 3, 4, 5].map((k) => ({ name: `late${k}`, at: (leave) => leave + 10 * k, snoozable: false, fresh: 60 }))
 ];
 
 function liveItems(state) { return state.items.filter((i) => !i.deleted); }
@@ -53,18 +54,26 @@ export function planNudges({ state, now = new Date() }) {
 
   const items = liveItems(st);
   const dow = lp.local.getDay();
-  const isSchoolDay = (s.schoolDays || []).includes(dow);
-  const common = { items, today: D, now: lp.local, leaveAt: s.leaveAt, userId: s.discord.userId || undefined, appUrl: s.appUrl || undefined, capture: st.capture, timetable: s.timetable };
+  // その日の予定（履修科目があれば、曜日ごとの出る時間・放課後・授業の終わり）
+  const plan = dayPlan(dow, s);
+  const isSchoolDay = plan.school;
+  const leaveAt = plan.leaveAt || s.leaveAt;
+  const leaveMin = hhmmToMinutes(leaveAt);
+  const wakeMin = plan.hasCourses ? leaveMin - 60 : hhmmToMinutes(s.wakeAt);
+  const subjects = daySubjects(D, s);
+  const common = { items, today: D, now: lp.local, leaveAt, userId: s.discord.userId || undefined, appUrl: s.appUrl || undefined, capture: st.capture, timetable: effectiveTimetable(s), subjects };
   const snoozed = st.nudge.snoozeUntil && new Date(st.nudge.snoozeUntil) > now;
 
-  // 朝のはしご：学校のある日だけ。期限がきょう／過ぎていて、まだ入れていないものがあるときだけ
-  const pending = nudgeStage({ items, today: D, now: lp.local, leaveAt: s.leaveAt }).stage !== 'clear';
+  // 朝のはしご：学校（授業）のある日だけ。期限がきょう／過ぎていて、まだ入れていないものがあるときだけ
+  const pending = nudgeStage({ items, today: D, now: lp.local, leaveAt }).stage !== 'clear';
   if (isSchoolDay) {
-    const due = LADDER.filter((r) => r.at(s) <= M && !sent[key(r.name)]);
+    // 授業が始まったら、もう「出る時間すぎた」は言わない（学校に着いている）
+    const arriveMin = plan.hasCourses && plan.lessons.length ? hhmmToMinutes(plan.lessons[0].start) : Infinity;
+    const due = LADDER.filter((r) => r.at(leaveMin, wakeMin) <= M && r.at(leaveMin, wakeMin) < arriveMin && !sent[key(r.name)]);
     if (due.length) {
       const last = due[due.length - 1];
       for (const r of due) mark(key(r.name));
-      const fresh = M - last.at(s) <= last.fresh;
+      const fresh = M - last.at(leaveMin, wakeMin) <= last.fresh;
       if (pending && fresh) {
         if (last.snoozable && snoozed) nudgeExtra.resendAfterSnooze = key(last.name); // 「あとで」が明けたら、この段をもう一度
         else actions.push({ slot: key(last.name), kind: 'morning', payload: discordPayload({ ...common, kind: 'morning' }) });
@@ -80,10 +89,21 @@ export function planNudges({ state, now = new Date() }) {
     }
   }
 
-  // 捕まえる：学校のある日の放課後、科目ごとに答え終わるまで。30 分おきに 3 回、そのあとは 1 時間おきに静かな時間まで
-  const cst = captureStatus({ items, capture: st.capture, today: D, timetable: s.timetable });
+  // 捕まえる（1）：授業が終わって 5 分後、その授業だけ「課題出た？」。いちばん思い出しやすいのは、いま
+  for (const l of plan.lessons) {
+    const t = hhmmToMinutes(l.end) + 5;
+    const slot = key(`class${l.period}`);
+    if (M >= t && !sent[slot]) {
+      mark(slot);
+      const one = captureStatus({ items, capture: st.capture, today: D, subjects: [l.subject] });
+      if (M - t <= 20 && !one.all) actions.push({ slot, kind: 'capture', payload: discordPayload({ ...common, kind: 'capture', subjects: [l.subject], askNo: 0 }) });
+    }
+  }
+
+  // 捕まえる（2）：放課後、その日の科目ごとに答え終わるまで。30 分おきに 3 回、そのあとは 1 時間おきに静かな時間まで
+  const cst = captureStatus({ items, capture: st.capture, today: D, subjects });
   if (isSchoolDay && !cst.all) {
-    const base = hhmmToMinutes((s.afterSchoolByDay || {})[dow] || s.afterSchoolAt);
+    const base = hhmmToMinutes(plan.afterSchoolAt);
     const step = Math.max(10, +s.captureRepeatMinutes || 30), max = Math.max(1, +s.captureMax || 3);
     const quietFrom = hhmmToMinutes(s.quietFrom || '22:00');
     const rungs = [];
@@ -101,8 +121,8 @@ export function planNudges({ state, now = new Date() }) {
   }
 
   // 学校を出る前：学校（机・ロッカー）にあるものを、かばんへ
-  if (isSchoolDay && s.leaveSchoolAt) {
-    const t = hhmmToMinutes(s.leaveSchoolAt);
+  if (isSchoolDay && plan.leaveSchoolAt) {
+    const t = hhmmToMinutes(plan.leaveSchoolAt);
     const slot = key('leaveschool');
     if (M >= t && M < t + 20 && !sent[slot]) {
       mark(slot);

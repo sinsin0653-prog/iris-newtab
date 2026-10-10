@@ -117,7 +117,7 @@
   function isOnline(item) {
     if (!item) return false;
     if (item.location === 'online') return true;
-    return /classroom|クラスルーム|タブレット|オンライン|google|ロイロ|teams|forms|提出フォーム|ネット/i.test(item.where || '');
+    return /classroom|クラスルーム|タブレット|オンライン|google|ロイロ|teams|forms|提出フォーム|ネット|lms|moodle|manaba|webclass|メール/i.test(item.where || '');
   }
 
   /** 期限の状態。色・言葉・アイコンの 3 点セットの元。flags: { packed, submitted, dropped } */
@@ -273,7 +273,117 @@
     return { date: nextSchoolDay(t, schoolDays), lesson: false };
   }
 
-  /** さっと登録。props: { today?, subjects?, timetable?, schoolDays?, paperSpot?, allowEmptyRange?, initial?, onSubmit(item), onCancel?(draft) } */
+  // ---- 履修科目（大学の時間割）から、曜日ごとの予定を作る ----
+  var DEFAULT_PERIODS = { 1: ['09:00', '10:30'], 2: ['10:40', '12:10'], 3: ['13:00', '14:30'], 4: ['14:40', '16:10'], 5: ['16:20', '17:50'], 6: ['18:00', '19:30'] };
+  function hm(t) { var m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); return m ? +m[1] * 60 + +m[2] : null; }
+  function hhmmOf(min) { min = ((Math.round(min) % 1440) + 1440) % 1440; var h = Math.floor(min / 60), m = min % 60; return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m; }
+  function courseName(c) { return (c && (c.short || c.name)) || ''; }
+  function isSlotted(c) { return !!c && c.day !== null && c.day !== undefined && c.day !== '' && !!c.period; }
+  function coursesOf(s) { return s && Array.isArray(s.courses) ? s.courses.filter(function (c) { return c && courseName(c); }) : []; }
+  /**
+   * その曜日の予定。履修科目（settings.courses）があればそこから作り、なければ設定の値を使う。
+   * → { hasCourses, school, lessons: [{ subject, name, period, room, teacher, start, end }], leaveAt, afterSchoolAt, leaveSchoolAt }
+   * 出る時間 = 最初の授業の開始 − 通学時間（commuteMinutes、既定 60 分）。放課後 = 最後の授業の終わり + 30 分。
+   */
+  function dayPlan(dow, s) {
+    s = s || {};
+    var courses = coursesOf(s);
+    if (!courses.length) {
+      var days = Array.isArray(s.schoolDays) && s.schoolDays.length ? s.schoolDays : [1, 2, 3, 4, 5];
+      return { hasCourses: false, school: days.indexOf(dow) >= 0, lessons: [], leaveAt: s.leaveAt || '07:50', afterSchoolAt: (s.afterSchoolByDay || {})[dow] || s.afterSchoolAt || '15:45', leaveSchoolAt: s.leaveSchoolAt || '16:30' };
+    }
+    var periods = s.periods || DEFAULT_PERIODS;
+    var lessons = courses.filter(function (c) { return isSlotted(c) && +c.day === dow && periods[c.period] && hm(periods[c.period][0]) !== null; }).map(function (c) {
+      return { subject: courseName(c), name: c.name || courseName(c), period: +c.period, room: c.room || '', teacher: c.teacher || '', start: periods[c.period][0], end: periods[c.period][1] };
+    }).sort(function (a, b) { return a.period - b.period; });
+    if (!lessons.length) return { hasCourses: true, school: false, lessons: [], leaveAt: null, afterSchoolAt: null, leaveSchoolAt: null };
+    var first = lessons[0], last = lessons[lessons.length - 1];
+    var commute = (s.commuteMinutes === 0 || +s.commuteMinutes > 0) ? +s.commuteMinutes : 60;
+    var leave = (s.leaveByDay || {})[dow] || hhmmOf(hm(first.start) - commute);
+    var after = (s.afterSchoolByDay || {})[dow] || hhmmOf(hm(last.end) + 30);
+    return { hasCourses: true, school: true, lessons: lessons, leaveAt: leave, afterSchoolAt: after, leaveSchoolAt: hhmmOf(hm(last.end) + 10) };
+  }
+  /** 曜日 → 科目名（履修科目があればそこから。なければ設定の timetable）。次の授業を探すのに使う。 */
+  function effectiveTimetable(s) {
+    s = s || {};
+    var courses = coursesOf(s);
+    if (!courses.length) return s.timetable || {};
+    var tt = {};
+    courses.forEach(function (c) {
+      if (!isSlotted(c)) return;
+      var k = String(+c.day), n = courseName(c);
+      tt[k] = tt[k] || [];
+      if (tt[k].indexOf(n) < 0) tt[k].push(n);
+    });
+    return tt;
+  }
+  /** 学校（授業）のある曜日。 */
+  function effectiveSchoolDays(s) {
+    s = s || {};
+    var courses = coursesOf(s);
+    if (!courses.length) return Array.isArray(s.schoolDays) && s.schoolDays.length ? s.schoolDays.slice() : [1, 2, 3, 4, 5];
+    var out = [];
+    courses.forEach(function (c) { if (isSlotted(c) && out.indexOf(+c.day) < 0) out.push(+c.day); });
+    return out.sort(function (a, b) { return a - b; });
+  }
+  /** 科目名の一覧（履修科目があればそこから。曜日のない授業も入る）。 */
+  function allSubjects(s) {
+    var courses = coursesOf(s);
+    if (!courses.length) return SUBJECTS.map(function (x) { return x.label; });
+    var out = [];
+    courses.forEach(function (c) { var n = courseName(c); if (out.indexOf(n) < 0) out.push(n); });
+    return out;
+  }
+  /** その日に聞く科目：その日の授業（時限順）。週の最後の授業日には、曜日のない授業（集中講義など）も。 */
+  function daySubjects(today, s) {
+    s = s || {};
+    var d = parseDate(today || new Date());
+    var courses = coursesOf(s);
+    if (!courses.length) return captureSubjects({ today: d, timetable: s.timetable });
+    var plan = dayPlan(d.getDay(), s);
+    var out = [];
+    plan.lessons.forEach(function (l) { if (out.indexOf(l.subject) < 0) out.push(l.subject); });
+    var days = effectiveSchoolDays(s);
+    if (plan.school && d.getDay() === days[days.length - 1]) courses.forEach(function (c) { if (!isSlotted(c)) { var n = courseName(c); if (out.indexOf(n) < 0) out.push(n); } });
+    return out;
+  }
+  /** いま聞いていい科目：授業が終わって 5 分たったもの。放課後（afterSchoolAt）を過ぎたらその日の全部。 */
+  function askableSubjects(today, minutes, s) {
+    s = s || {};
+    var d = parseDate(today || new Date());
+    if (!coursesOf(s).length) return daySubjects(d, s);
+    var plan = dayPlan(d.getDay(), s);
+    if (!plan.school) return [];
+    if (minutes >= hm(plan.afterSchoolAt)) return daySubjects(d, s);
+    var out = [];
+    plan.lessons.forEach(function (l) { if (hm(l.end) + 5 <= minutes && out.indexOf(l.subject) < 0) out.push(l.subject); });
+    return out;
+  }
+  /** その日のその科目の授業。 */
+  function lessonOn(subject, date, s) {
+    var d = parseDate(date);
+    var plan = dayPlan(d.getDay(), s);
+    for (var i = 0; i < plan.lessons.length; i++) if (plan.lessons[i].subject === subject) return plan.lessons[i];
+    return null;
+  }
+  /** 出すところ（授業から作る）：「10/12（月） 2限 B-201」 */
+  function submitPlace(subject, due, s) {
+    var l = lessonOn(subject, due, s);
+    return l ? formatDate(due) + ' ' + l.period + '限' + (l.room ? ' ' + l.room : '') : '';
+  }
+  /** いま（授業中）か、つぎの授業。きょうもう無ければ null。 */
+  function nextClass(now, s) {
+    var n = toNow(now);
+    var plan = dayPlan(n.getDay(), s);
+    var m = n.getHours() * 60 + n.getMinutes();
+    for (var i = 0; i < plan.lessons.length; i++) {
+      var l = plan.lessons[i];
+      if (hm(l.end) > m) return { lesson: l, during: hm(l.start) <= m };
+    }
+    return null;
+  }
+
+  /** さっと登録。props: { today?, subjects?, moreSubjects?（「ほかの授業」に畳む）, wherePresets?, timetable?, schoolDays?, paperSpot?, allowEmptyRange?, initial?, onSubmit(item), onCancel?(draft) } */
   function QuickAdd(props) {
     props = props || {};
     var today = parseDate(props.today || new Date());
@@ -342,6 +452,26 @@
       return g;
     }
 
+    var more = (props.moreSubjects || []).filter(function (x) { return subjects.indexOf(x) < 0; });
+    var subjectGroup = choiceGroup('科目', subjects.concat(more).map(function (s) { return { label: s, value: s }; }), false, function (opt) {
+      state.subject = opt.value;
+      if (dueGroup && !state.dueChoice) {
+        var fresh = buildDueGroup();
+        dueGroup.replaceWith(fresh); dueGroup = fresh;
+      }
+    });
+    var moreBtn = null;
+    if (more.length) {
+      var hiddenCount = 0;
+      Array.prototype.forEach.call(subjectGroup.children, function (c, i) {
+        if (i >= subjects.length && c.textContent !== state.subject) { c.hidden = true; hiddenCount++; }
+      });
+      if (hiddenCount) moreBtn = el('button', { className: 'sk-more', type: 'button', text: 'ほかの授業（' + hiddenCount + '）', onClick: function () {
+        Array.prototype.forEach.call(subjectGroup.children, function (c) { c.hidden = false; });
+        moreBtn.remove();
+      } });
+    }
+
     var form = el('form', { className: 'sk-quick', novalidate: true },
       el('div', { className: 'sk-quick__head' },
         el('h2', { className: 'sk-quick__title', text: 'さっと登録' }),
@@ -349,13 +479,8 @@
       ),
       el('div', { className: 'sk-field' },
         el('p', { className: 'sk-field__label', text: '01 科目' }),
-        choiceGroup('科目', subjects.map(function (s) { return { label: s, value: s }; }), false, function (opt) {
-          state.subject = opt.value;
-          if (dueGroup && !state.dueChoice) {
-            var fresh = buildDueGroup();
-            dueGroup.replaceWith(fresh); dueGroup = fresh;
-          }
-        })
+        subjectGroup,
+        moreBtn
       ),
       el('div', { className: 'sk-field' },
         el('label', { className: 'sk-field__label', 'for': 'sk-range' }, icon('book', 20), el('span', { text: '02 範囲（ここだけ書く）' })),
@@ -363,10 +488,10 @@
       ),
       el('div', { className: 'sk-field' },
         el('p', { className: 'sk-field__label' }, icon('pin', 20), el('span', { text: '03 どこにある？' })),
-        choiceGroup('どこにある', WHERE_PRESETS.map(function (w) { return { label: w, value: w }; }), true, function (opt, on) {
+        choiceGroup('どこにある', (props.wherePresets || WHERE_PRESETS).map(function (w) { return { label: w, value: w }; }), true, function (opt, on) {
           var i = state.where.indexOf(opt.value);
           if (on && i < 0) state.where.push(opt.value); else if (!on && i >= 0) state.where.splice(i, 1);
-          if (opt.value === 'Classroom' || opt.value === 'タブレット') { if (on && !state.location) state.location = 'online'; }
+          if (/classroom|タブレット|lms|moodle|メール/i.test(opt.value)) { if (on && !state.location) state.location = 'online'; }
           updatePaperHint();
         }),
         whereOther,
@@ -562,7 +687,7 @@
     var canSnooze = (n.stage === 'calm' || n.stage === 'soon') && (props.snoozeLeft === undefined || props.snoozeLeft > 0);
     var bar = el('section', { className: 'sk-nudge sk-nudge--' + n.stage, role: n.stage === 'urgent' || n.stage === 'late' ? 'alert' : 'status', 'aria-live': 'polite' },
       el('p', { className: 'sk-nudge__eyebrow', text: '出る時間 ' + n.leaveAt + ' まで' }),
-      el('p', { className: 'sk-nudge__count', text: n.label }),
+      el('p', { className: 'sk-nudge__count' + (n.label.length >= 6 ? ' sk-nudge__count--long' : n.label.length === 5 ? ' sk-nudge__count--mid' : ''), text: n.label }),
       el('div', { className: 'sk-nudge__item' },
         SubjectTag({ subject: first.subject }),
         el('span', { className: 'sk-nudge__range', text: first.range || '' }),
@@ -616,7 +741,7 @@
   /** きょう聞く科目。時間割があればその日の科目、なければ 6 科目。 */
   function captureSubjects(opts) {
     opts = opts || {};
-    if (Array.isArray(opts.subjects) && opts.subjects.length) return opts.subjects.slice(0, 7);
+    if (Array.isArray(opts.subjects)) return opts.subjects.slice(0, 7);
     var today = parseDate(opts.today || new Date());
     var tt = opts.timetable || {};
     var list = tt[String(today.getDay())];
@@ -626,6 +751,7 @@
   /** 聞き方は回を追うごとに変える（同じ文は慣れる）。 */
   function captureWording(askNo, today, subs) {
     var d = parseDate(today || new Date());
+    if (askNo === 0) return (subs.length ? subs.join('・') + '、おわった。' : '') + '課題出た？';
     if (askNo <= 1) return 'きょう、宿題出た？';
     if (askNo === 2) return WEEKDAYS[d.getDay()] + '曜。' + subs.join('・') + '。どれか出た？';
     if (askNo === 3) return 'まだ答えてない。Classroom と連絡帳を開いて確かめて。';
@@ -634,12 +760,12 @@
 
   /**
    * 放課後の「きょう、宿題出た？」。科目ごとに「出た／なし」。
-   * props: { items?, capture?, timetable?, subjects?, today?, asked?, handin?: items, onPick(subject), onNone(subject), onNoneAll(), onReopen(), onSubmit(item), onDrop(item) }
+   * props: { items?, capture?, timetable?, subjects?, today?, asked?（0 は授業の直後）, handin?: items, onPick(subject), onNone(subject), onNoneAll(), onReopen(), onSubmit(item), onDrop(item) }
    */
   function CaptureAsk(props) {
     props = props || {};
     var st = captureStatus(props);
-    var asked = props.asked || 1;
+    var asked = props.asked === 0 ? 0 : (props.asked || 1);
     var handin = (props.handin || []);
     var handinRows = handin.length ? el('div', { className: 'sk-capture__handin' },
       el('p', { className: 'sk-capture__sub', text: '持っていったぶん、出した？' }),
@@ -661,7 +787,7 @@
         handinRows);
     }
     return el('section', { className: 'sk-capture' + (asked >= 3 ? ' sk-capture--again' : ''), role: asked >= 3 ? 'alert' : 'status' },
-      el('p', { className: 'sk-capture__eyebrow', text: asked > 1 ? '放課後のチェック ・ ' + asked + ' 回目' : '放課後のチェック' }),
+      el('p', { className: 'sk-capture__eyebrow', text: asked === 0 ? '授業のあと' : asked > 1 ? '放課後のチェック ・ ' + asked + ' 回目' : '放課後のチェック' }),
       el('h2', { className: 'sk-capture__title', text: captureWording(asked, props.today, st.unanswered) }),
       el('p', { className: 'sk-capture__line', text: '科目ごとに「出た」か「なし」。出たら 10 秒で登録、範囲はあとでもいい。' }),
       el('div', { className: 'sk-capture__rows', role: 'group', 'aria-label': '科目ごとの答え' }, st.unanswered.map(function (sub) {
@@ -703,7 +829,7 @@
       var tomorrow = addDays(today, 1);
       items = live.filter(function (i) { return isActive(i) && !i.done && parseDate(i.due) <= tomorrow; });
       title = 'あしたまで ' + items.length + ' つ。いまのうちに。';
-      est = (props.capture !== undefined || props.timetable) ? captureStatus({ items: live, capture: props.capture, today: today, timetable: props.timetable }) : null;
+      est = (props.capture !== undefined || props.timetable || props.subjects) ? captureStatus({ items: live, capture: props.capture, today: today, timetable: props.timetable, subjects: props.subjects }) : null;
       if (est && !est.all) title = 'まだ答えてない科目：' + est.unanswered.join('・') + '。出た？ ' + (items.length ? title : '');
       else if (est && est.allNone && props.askAgainOnNone) title = 'きょうは全部「なし」。ほんとに？ Classroom は見た？ ' + (items.length ? title : '');
       else if (props.captureMissing) title = 'きょう登録ゼロ。ほんとに宿題なし？ ' + (items.length ? title : '');
@@ -711,7 +837,7 @@
     } else if (kind === 'capture') {
       var cst = captureStatus({ items: live, capture: props.capture, today: today, timetable: props.timetable, subjects: props.subjects });
       var subs = cst.unanswered;
-      var askNo = props.askNo || 1;
+      var askNo = props.askNo === 0 ? 0 : (props.askNo || 1);
       title = captureWording(askNo, today, subs);
       var rows = [];
       var caps = [];
@@ -847,6 +973,16 @@
     isPackedToday: isPackedToday,
     nextSchoolDay: nextSchoolDay,
     nextLesson: nextLesson,
+    DEFAULT_PERIODS: DEFAULT_PERIODS,
+    dayPlan: dayPlan,
+    effectiveTimetable: effectiveTimetable,
+    effectiveSchoolDays: effectiveSchoolDays,
+    allSubjects: allSubjects,
+    daySubjects: daySubjects,
+    askableSubjects: askableSubjects,
+    lessonOn: lessonOn,
+    submitPlace: submitPlace,
+    nextClass: nextClass,
     LOCATION_PRESETS: LOCATION_PRESETS,
     nudgeStage: nudgeStage,
     discordPayload: discordPayload,

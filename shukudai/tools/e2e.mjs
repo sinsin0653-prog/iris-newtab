@@ -215,6 +215,75 @@ try {
   check(true, '?add=1 で登録シートが開く');
   await page.keyboard.press('Escape');
 
+  // 履修科目（架空の時間割）：リンクで取り込む → 授業の直後に聞く → 次の授業が期限・教室が出すところ
+  const uni = { courses: [
+    { name: '統計学 I', short: '統計学', day: 1, period: 1, room: 'A-101' },
+    { name: 'フランス語(a)', short: 'フランス語(a)', day: 1, period: 2, room: 'B-201' },
+    { name: '英語演習 II', short: '英語演習', day: 2, period: 4, room: 'C-301' },
+    { name: '英語演習 II', short: '英語演習', day: 4, period: 2, room: 'C-302' },
+    { name: 'ゼミ', short: 'ゼミ', day: 5, period: 5, room: 'D-401' },
+    { name: '集中講義 A', short: '集中講義', day: null, period: null }
+  ], commuteMinutes: 60 };
+  await page.clock.setFixedTime(new Date('2026-10-12T10:36:00+09:00')); // 月曜、1限が終わって 6 分
+  await page.goto(`http://127.0.0.1:${PORT}/#import=` + Buffer.from(JSON.stringify(uni), 'utf8').toString('base64url'), { waitUntil: 'load' });
+  await page.waitForSelector('.panel__title:has-text("時間割を入れる？")');
+  check((await page.textContent('.courses')).includes('1限 統計学 A-101'), '取り込む前に中身を見せる');
+  await page.click('.panel .sk-btn--primary');
+  await page.waitForSelector('.panel', { state: 'detached' });
+  check(!(await page.evaluate(() => location.hash)), '取り込んだらリンクの中身を URL から消す');
+  check((await page.textContent('.brand__date')).includes('出る 08:00'), '月曜の出る時間は 1限 − 通学 60 分');
+  check((await page.textContent('.brand__next')).includes('つぎ 2限 フランス語(a) B-201（10:40〜）'), 'つぎの授業と教室が出る');
+  check(await page.$('.sk-nudge') === null, '授業が始まったあとは「出る時間すぎた」を出さない');
+  await page.waitForSelector('.sk-capture');
+  check((await page.textContent('.sk-capture__eyebrow')) === '授業のあと', '授業が終わったら、その場で聞く');
+  check((await page.textContent('.sk-capture__title')).includes('統計学、おわった。課題出た？'), '終わった授業の名前で聞く');
+  const askNow = await page.$$eval('.sk-capture__rows .sk-capture__name', (b) => b.map((x) => x.textContent));
+  check(askNow.join(',') === '統計学', 'まだ終わっていない授業は聞かない');
+  await page.screenshot({ path: path.join(shots, '12-courses-home.png') });
+  await page.click('.sk-capture__row:has-text("統計学") .sk-choice--yes');
+  await page.waitForSelector('.sk-quick');
+  const dueChips = await page.$$eval('.sk-quick .sk-choices[aria-label="いつまで"] .sk-choice', (b) => b.map((x) => x.textContent));
+  check(dueChips[0] === '次の統計学（10/19 月）', '期限の既定は次の授業（' + dueChips[0] + '）');
+  const subjChips = await page.$$eval('.sk-quick .sk-choices[aria-label="科目"] .sk-choice', (b) => b.filter((x) => x.getBoundingClientRect().width > 0).map((x) => x.textContent));
+  check(subjChips.join(',') === '統計学,フランス語(a)', 'きょうの授業が先頭（' + subjChips.join(',') + '）');
+  check((await page.textContent('.sk-more')).includes('ほかの授業'), 'ほかの授業は畳んである');
+  await page.click('.sk-more');
+  const allChips = await page.$$eval('.sk-quick .sk-choices[aria-label="科目"] .sk-choice', (b) => b.filter((x) => x.getBoundingClientRect().width > 0).map((x) => x.textContent));
+  check(allChips.includes('英語演習') && allChips.includes('集中講義') && await page.$('.sk-more') === null, '「ほかの授業」を押すと全部出る');
+  check((await page.textContent('.sk-quick')).includes('LMS'), '大学向けの「どこにある」');
+  await page.fill('#sk-range', '演習問題 3-1〜3-5');
+  await page.click('.sk-quick button[type="submit"]');
+  await page.waitForSelector('.sk-quick', { state: 'detached' });
+  const added = await page.evaluate(() => JSON.parse(localStorage.getItem('shukudai.state.v1')).items.find((i) => i.range === '演習問題 3-1〜3-5'));
+  check(added && added.due === '2026-10-19' && added.submitTo === '10/19（月） 1限 A-101', '出すところが授業の教室になる（' + (added && added.submitTo) + '）');
+  check(await page.$('.sk-capture__rows') === null, '答えたら科目の問いは引っこむ（次の授業のあとにまた出る。持っていったぶんの「出した？」は残る）');
+  await page.click('.sk-pill:has-text("設定")');
+  await page.waitForSelector('.courses__leave');
+  const leaveLine = await page.textContent('.courses__leave');
+  check(leaveLine.includes('月 08:00') && leaveLine.includes('金 15:20') && !leaveLine.includes('水'), '曜日ごとの出る時間（' + leaveLine + '）');
+  check(await page.$('input[aria-label="月曜の時間割"]') === null, '手で入れる時間割は隠す');
+  await page.screenshot({ path: path.join(shots, '13-courses-settings.png'), fullPage: true });
+  await page.keyboard.press('Escape');
+  await page.click('.sk-pill:has-text("こんしゅう")');
+  await page.waitForSelector('.week__classes');
+  check((await page.textContent('.week__day.is-today .week__classes')).includes('1限 統計学 A-101'), 'こんしゅうに授業も出る');
+  await page.keyboard.press('Escape');
+  // 金曜（5限だけ）の朝 7:30：期限が金曜でも、まだ焦らせない
+  await page.evaluate(() => {
+    const st = JSON.parse(localStorage.getItem('shukudai.state.v1'));
+    st.items.push({ id: 'fri', subject: 'ゼミ', range: 'レジュメ', where: 'プリント', due: '2026-10-16', done: false, packed: false, createdAt: '2026-10-09T01:00:00Z', createdOn: '2026-10-09', updatedAt: '2026-10-09T01:00:00Z' });
+    localStorage.setItem('shukudai.state.v1', JSON.stringify(st));
+  });
+  await page.clock.setFixedTime(new Date('2026-10-16T07:30:00+09:00'));
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('.brand__date');
+  check((await page.textContent('.brand__date')).includes('出る 15:20'), '金曜は 15:20 に出る');
+  check(await page.$('.sk-nudge') === null, '金曜の朝 7:30 はバーを出さない');
+  await page.clock.setFixedTime(new Date('2026-10-16T14:50:00+09:00'));
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForSelector('.sk-nudge');
+  check((await page.textContent('.sk-nudge__count')).includes('あと30分'), '金曜は 14:50 に「あと30分」');
+
   check(errors.length === 0, 'コンソールエラーなし' + (errors.length ? ' → ' + errors.join(' | ') : ''));
 } catch (e) {
   failed++;

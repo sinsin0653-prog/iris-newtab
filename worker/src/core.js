@@ -42,7 +42,7 @@ export function isActive(item) { return !!item && !item.deleted && !item.submitt
 export function isOnline(item) {
   if (!item) return false;
   if (item.location === 'online') return true;
-  return /classroom|クラスルーム|タブレット|オンライン|google|ロイロ|teams|forms|提出フォーム|ネット/i.test(item.where || '');
+  return /classroom|クラスルーム|タブレット|オンライン|google|ロイロ|teams|forms|提出フォーム|ネット|lms|moodle|manaba|webclass|メール/i.test(item.where || '');
 }
 
 /** 期限の状態。色・言葉・アイコンの 3 点セットの元。flags: { packed, submitted, dropped } */
@@ -79,6 +79,102 @@ export function nextLesson(subject, today, timetable, schoolDays) {
     if (Array.isArray(list) && list.indexOf(subject) >= 0) return { date: d, lesson: true };
   }
   return { date: nextSchoolDay(t, schoolDays), lesson: false };
+}
+
+// ---- 履修科目（大学の時間割）から、曜日ごとの予定を作る ----
+export const DEFAULT_PERIODS = { 1: ['09:00', '10:30'], 2: ['10:40', '12:10'], 3: ['13:00', '14:30'], 4: ['14:40', '16:10'], 5: ['16:20', '17:50'], 6: ['18:00', '19:30'] };
+function hm(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); return m ? +m[1] * 60 + +m[2] : null; }
+export function hhmmOf(min) { min = ((Math.round(min) % 1440) + 1440) % 1440; const h = Math.floor(min / 60), m = min % 60; return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`; }
+function courseName(c) { return (c && (c.short || c.name)) || ''; }
+function isSlotted(c) { return !!c && c.day !== null && c.day !== undefined && c.day !== '' && !!c.period; }
+function coursesOf(s) { return s && Array.isArray(s.courses) ? s.courses.filter((c) => c && courseName(c)) : []; }
+/** その曜日の予定。出る時間 = 最初の授業の開始 − 通学時間（既定 60 分）。放課後 = 最後の授業の終わり + 30 分。 */
+export function dayPlan(dow, s = {}) {
+  s = s || {};
+  const courses = coursesOf(s);
+  if (!courses.length) {
+    const days = Array.isArray(s.schoolDays) && s.schoolDays.length ? s.schoolDays : [1, 2, 3, 4, 5];
+    return { hasCourses: false, school: days.indexOf(dow) >= 0, lessons: [], leaveAt: s.leaveAt || '07:50', afterSchoolAt: (s.afterSchoolByDay || {})[dow] || s.afterSchoolAt || '15:45', leaveSchoolAt: s.leaveSchoolAt || '16:30' };
+  }
+  const periods = s.periods || DEFAULT_PERIODS;
+  const lessons = courses.filter((c) => isSlotted(c) && +c.day === dow && periods[c.period] && hm(periods[c.period][0]) !== null).map((c) => (
+    { subject: courseName(c), name: c.name || courseName(c), period: +c.period, room: c.room || '', teacher: c.teacher || '', start: periods[c.period][0], end: periods[c.period][1] }
+  )).sort((a, b) => a.period - b.period);
+  if (!lessons.length) return { hasCourses: true, school: false, lessons: [], leaveAt: null, afterSchoolAt: null, leaveSchoolAt: null };
+  const first = lessons[0], last = lessons[lessons.length - 1];
+  const commute = (s.commuteMinutes === 0 || +s.commuteMinutes > 0) ? +s.commuteMinutes : 60;
+  const leave = (s.leaveByDay || {})[dow] || hhmmOf(hm(first.start) - commute);
+  const after = (s.afterSchoolByDay || {})[dow] || hhmmOf(hm(last.end) + 30);
+  return { hasCourses: true, school: true, lessons, leaveAt: leave, afterSchoolAt: after, leaveSchoolAt: hhmmOf(hm(last.end) + 10) };
+}
+export function effectiveTimetable(s = {}) {
+  s = s || {};
+  const courses = coursesOf(s);
+  if (!courses.length) return s.timetable || {};
+  const tt = {};
+  courses.forEach((c) => {
+    if (!isSlotted(c)) return;
+    const k = String(+c.day), n = courseName(c);
+    tt[k] = tt[k] || [];
+    if (tt[k].indexOf(n) < 0) tt[k].push(n);
+  });
+  return tt;
+}
+export function effectiveSchoolDays(s = {}) {
+  s = s || {};
+  const courses = coursesOf(s);
+  if (!courses.length) return Array.isArray(s.schoolDays) && s.schoolDays.length ? s.schoolDays.slice() : [1, 2, 3, 4, 5];
+  const out = [];
+  courses.forEach((c) => { if (isSlotted(c) && out.indexOf(+c.day) < 0) out.push(+c.day); });
+  return out.sort((a, b) => a - b);
+}
+export function allSubjects(s) {
+  const courses = coursesOf(s);
+  if (!courses.length) return SUBJECTS.slice();
+  const out = [];
+  courses.forEach((c) => { const n = courseName(c); if (out.indexOf(n) < 0) out.push(n); });
+  return out;
+}
+/** その日に聞く科目：その日の授業（時限順）。週の最後の授業日には、曜日のない授業も。 */
+export function daySubjects(today, s = {}) {
+  s = s || {};
+  const d = parseDate(today || new Date());
+  const courses = coursesOf(s);
+  if (!courses.length) return captureSubjects({ today: d, timetable: s.timetable });
+  const plan = dayPlan(d.getDay(), s);
+  const out = [];
+  plan.lessons.forEach((l) => { if (out.indexOf(l.subject) < 0) out.push(l.subject); });
+  const days = effectiveSchoolDays(s);
+  if (plan.school && d.getDay() === days[days.length - 1]) courses.forEach((c) => { if (!isSlotted(c)) { const n = courseName(c); if (out.indexOf(n) < 0) out.push(n); } });
+  return out;
+}
+/** いま聞いていい科目：授業が終わって 5 分たったもの。放課後を過ぎたらその日の全部。 */
+export function askableSubjects(today, minutes, s = {}) {
+  s = s || {};
+  const d = parseDate(today || new Date());
+  if (!coursesOf(s).length) return daySubjects(d, s);
+  const plan = dayPlan(d.getDay(), s);
+  if (!plan.school) return [];
+  if (minutes >= hm(plan.afterSchoolAt)) return daySubjects(d, s);
+  const out = [];
+  plan.lessons.forEach((l) => { if (hm(l.end) + 5 <= minutes && out.indexOf(l.subject) < 0) out.push(l.subject); });
+  return out;
+}
+export function lessonOn(subject, date, s) {
+  const d = parseDate(date);
+  const plan = dayPlan(d.getDay(), s);
+  return plan.lessons.find((l) => l.subject === subject) || null;
+}
+export function submitPlace(subject, due, s) {
+  const l = lessonOn(subject, due, s);
+  return l ? `${formatDate(due)} ${l.period}限${l.room ? ' ' + l.room : ''}` : '';
+}
+export function nextClass(now, s) {
+  const n = toNow(now);
+  const plan = dayPlan(n.getDay(), s);
+  const m = n.getHours() * 60 + n.getMinutes();
+  for (const l of plan.lessons) if (hm(l.end) > m) return { lesson: l, during: hm(l.start) <= m };
+  return null;
 }
 
 // ---- 焦らせる：出発時刻までの残り時間と段階 ----
@@ -124,7 +220,7 @@ function createdOn(item) {
   return item.createdAt ? toISO(new Date(item.createdAt)) : null;
 }
 export function captureSubjects(opts = {}) {
-  if (Array.isArray(opts.subjects) && opts.subjects.length) return opts.subjects.slice(0, 7);
+  if (Array.isArray(opts.subjects)) return opts.subjects.slice(0, 7);
   const today = parseDate(opts.today || new Date());
   const list = (opts.timetable || {})[String(today.getDay())];
   if (Array.isArray(list) && list.length) return list.slice(0, 7);
@@ -133,6 +229,7 @@ export function captureSubjects(opts = {}) {
 /** 聞き方は回を追うごとに変える（同じ文は慣れる）。 */
 export function captureWording(askNo, today, subs) {
   const d = parseDate(today || new Date());
+  if (askNo === 0) return (subs.length ? subs.join('・') + '、おわった。' : '') + '課題出た？';
   if (askNo <= 1) return 'きょう、宿題出た？';
   if (askNo === 2) return `${WEEKDAYS[d.getDay()]}曜。${subs.join('・')}。どれか出た？`;
   if (askNo === 3) return 'まだ答えてない。Classroom と連絡帳を開いて確かめて。';
@@ -195,7 +292,7 @@ export function discordPayload(props = {}) {
     const tomorrow = addDays(today, 1);
     items = live.filter((i) => isActive(i) && !i.done && parseDate(i.due) <= tomorrow);
     title = `あしたまで ${items.length} つ。いまのうちに。`;
-    est = (props.capture !== undefined || props.timetable) ? captureStatus({ items: live, capture: props.capture, today, timetable: props.timetable }) : null;
+    est = (props.capture !== undefined || props.timetable || props.subjects) ? captureStatus({ items: live, capture: props.capture, today, timetable: props.timetable, subjects: props.subjects }) : null;
     if (est && !est.all) title = `まだ答えてない科目：${est.unanswered.join('・')}。出た？ ` + (items.length ? title : '');
     else if (est && est.allNone && props.askAgainOnNone) title = 'きょうは全部「なし」。ほんとに？ Classroom は見た？ ' + (items.length ? title : '');
     else if (props.captureMissing) title = 'きょう登録ゼロ。ほんとに宿題なし？ ' + (items.length ? title : '');
@@ -203,7 +300,7 @@ export function discordPayload(props = {}) {
   } else if (kind === 'capture') {
     const cst = captureStatus({ items: live, capture: props.capture, today, timetable: props.timetable, subjects: props.subjects });
     const subs = cst.unanswered;
-    const askNo = props.askNo || 1;
+    const askNo = props.askNo === 0 ? 0 : (props.askNo || 1);
     title = captureWording(askNo, today, subs);
     const rows = [];
     const caps = [];

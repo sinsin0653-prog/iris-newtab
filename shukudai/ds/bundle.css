@@ -203,6 +203,9 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
 }
 .sk-nudge__eyebrow { margin: 0; font-family: var(--font-mono); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: .12em; text-transform: uppercase; color: var(--ink-soft); }
 .sk-nudge__count { margin: 0; font-family: var(--font-display); font-size: 64px; line-height: 64px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* 長い数字（あと30分・15分すぎた）は小さく組んで、スマホ幅に収める */
+.sk-nudge__count--mid { font-size: 52px; line-height: 56px; }
+.sk-nudge__count--long { font-size: 44px; line-height: 48px; }
 .sk-nudge__item { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-top: var(--space-2); }
 .sk-nudge__range { font-size: 18px; line-height: 26px; font-weight: 700; overflow-wrap: anywhere; }
 .sk-nudge__state { font-family: var(--font-mono); font-size: 13px; line-height: 18px; letter-spacing: .04em; padding: 2px var(--space-2); border: var(--border) solid currentColor; border-radius: var(--radius-pill); }
@@ -285,3 +288,9 @@ button.sk-card__body:focus-visible { outline: 3px solid var(--focus); outline-of
   .sk-card__check.is-pop { animation: none; }
   .sk-btn:active { transform: none; }
 }
+
+/* ---- QuickAdd：ほかの授業 ---- */
+.sk-more { align-self: flex-start; min-height: 40px; padding: 0 var(--space-3); border: var(--border) dashed var(--line-strong); border-radius: var(--radius-pill); background: transparent; color: var(--ink-soft); font-family: var(--font-sans); font-size: 14px; line-height: 20px; font-weight: 700; cursor: pointer; }
+.sk-more:focus-visible { outline: 3px solid var(--focus); outline-offset: 4px; }
+/* hidden 属性は、display を指定した部品にも必ず効かせる（「ほかの授業」を畳む、日付入力を隠す） */
+.sk-choice[hidden], .sk-input[hidden], .sk-btn[hidden] { display: none; }

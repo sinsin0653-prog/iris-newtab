@@ -16,3 +16,21 @@ export function stateWith(overrides = {}) {
     ...(overrides.items ? { items: overrides.items } : {})
   };
 }
+
+// 架空の大学の時間割（テスト用。実在の時間割は入れない）
+export function uniCourses() {
+  return [
+    { name: '統計学 I', short: '統計学', day: 1, period: 1, room: 'A-101' },
+    { name: 'フランス語(a)', short: 'フランス語(a)', day: 1, period: 2, room: 'B-201' },
+    { name: '英語演習 II', short: '英語演習', day: 2, period: 4, room: 'C-301' },
+    { name: '英語演習 II', short: '英語演習', day: 4, period: 2, room: 'C-302' },
+    { name: 'ゼミ', short: 'ゼミ', day: 5, period: 5, room: 'D-401' },
+    { name: '集中講義 A', short: '集中講義', day: null, period: null }
+  ];
+}
+export function uniState(overrides = {}) {
+  const st = stateWith({ settings: { courses: uniCourses(), commuteMinutes: 60, ...(overrides.settings || {}) }, nudge: overrides.nudge || {} });
+  st.items = overrides.items || [];
+  if (overrides.capture) st.capture = overrides.capture;
+  return st;
+}

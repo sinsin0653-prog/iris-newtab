@@ -22,6 +22,10 @@ export const DEFAULT_SETTINGS = Object.freeze({
   classroomUrl: '',
   paperSpot: '',
   watch: { good: true, evening: false, late: false },
+  courses: [],
+  periods: null,
+  commuteMinutes: 60,
+  leaveByDay: {},
   discord: { userId: null, watchChannelId: null }
 });
 
@@ -36,6 +40,8 @@ export function withDefaults(state) {
   settings.watch = { ...DEFAULT_SETTINGS.watch, ...((s.settings && s.settings.watch) || {}) };
   if (!settings.afterSchoolByDay || typeof settings.afterSchoolByDay !== 'object') settings.afterSchoolByDay = {};
   if (!settings.timetable || typeof settings.timetable !== 'object') settings.timetable = {};
+  if (!Array.isArray(settings.courses)) settings.courses = [];
+  if (!settings.leaveByDay || typeof settings.leaveByDay !== 'object') settings.leaveByDay = {};
   if (!Array.isArray(settings.overdueAt)) settings.overdueAt = [...DEFAULT_SETTINGS.overdueAt];
   return {
     v: 1,

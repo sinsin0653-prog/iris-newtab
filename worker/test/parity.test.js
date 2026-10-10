@@ -58,3 +58,23 @@ test('captureStatus / nextLesson / isPackedToday agree', () => {
   for (const flags of [{ packed: true }, { submitted: true }, { dropped: true }, {}]) assert.deepEqual(core.dueInfo('2026-10-07', '2026-10-09', true, flags), S.dueInfo('2026-10-07', '2026-10-09', true, flags));
   assert.equal(core.captureWording(2, '2026-10-09', ['数学']), S.captureWording(2, '2026-10-09', ['数学']));
 });
+
+test('course schedule helpers agree', async () => {
+  const { uniCourses } = await import('./helpers.js');
+  const s = { courses: uniCourses(), commuteMinutes: 45 };
+  for (const dow of [0, 1, 2, 3, 4, 5, 6]) assert.deepEqual(core.dayPlan(dow, s), S.dayPlan(dow, s), 'dayPlan ' + dow);
+  assert.deepEqual(core.effectiveTimetable(s), S.effectiveTimetable(s));
+  assert.deepEqual(core.effectiveSchoolDays(s), S.effectiveSchoolDays(s));
+  assert.deepEqual(core.allSubjects(s), S.allSubjects(s));
+  for (const d of ['2026-10-12', '2026-10-13', '2026-10-14', '2026-10-16']) {
+    assert.deepEqual(core.daySubjects(d, s), S.daySubjects(d, s), 'daySubjects ' + d);
+    for (const m of [600, 640, 760, 1100]) assert.deepEqual(core.askableSubjects(d, m, s), S.askableSubjects(d, m, s), `askable ${d} ${m}`);
+  }
+  assert.equal(core.submitPlace('英語演習', '2026-10-15', s), S.submitPlace('英語演習', '2026-10-15', s));
+  assert.deepEqual(core.nextClass(new Date(2026, 9, 12, 9, 30), s), S.nextClass(new Date(2026, 9, 12, 9, 30), s));
+  const p = { kind: 'capture', items: [], now: '2026-10-12T10:36', today: '2026-10-12', subjects: ['統計学'], askNo: 0 };
+  assert.deepEqual(core.discordPayload(p), S.discordPayload(p));
+  // 履修科目がないときは今までどおり
+  assert.deepEqual(core.dayPlan(1, {}), S.dayPlan(1, {}));
+  assert.deepEqual(core.daySubjects('2026-10-12', {}), S.daySubjects('2026-10-12', {}));
+});
