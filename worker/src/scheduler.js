@@ -1,5 +1,5 @@
 // はしごを上る係。5 分おきに呼ばれ、「いま送るべき催促」を決める。送るのは index.js。
-import { discordPayload, nudgeStage, dueInfo, parseDate, addDays, hhmmToMinutes, captureStatus, isActive, isPackedToday, dayPlan, daySubjects, effectiveTimetable } from './core.js';
+import { discordPayload, nudgeStage, dueInfo, parseDate, addDays, hhmmToMinutes, captureStatus, hasSubjects, isActive, isPackedToday, dayPlan, daySubjects, effectiveTimetable } from './core.js';
 import { withDefaults } from './state.js';
 
 /** UTC の Date を、設定のタイムゾーンの「壁時計」に直す。local は getHours() などがその壁時計を返す Date。 */
@@ -63,7 +63,9 @@ export function planNudges({ state, now = new Date() }) {
   const leaveAt = plan.leaveAt || s.leaveAt;
   const leaveMin = hhmmToMinutes(leaveAt);
   const wakeMin = plan.hasCourses ? leaveMin - 60 : hhmmToMinutes(s.wakeAt);
-  const subjects = daySubjects(D, s);
+  // 科目が決まっていない（時間割がまだサーバーに届いていない）あいだは、「課題出た？」を聞かない
+  const asking = hasSubjects(s);
+  const subjects = asking ? daySubjects(D, s) : [];
   const common = { items, today: D, now: lp.local, leaveAt, userId: s.discord.userId || undefined, appUrl: s.appUrl || undefined, capture: st.capture, timetable: effectiveTimetable(s), subjects };
   const snoozed = st.nudge.snoozeUntil && new Date(st.nudge.snoozeUntil) > now;
 
@@ -93,7 +95,7 @@ export function planNudges({ state, now = new Date() }) {
   }
 
   // 捕まえる（1）：授業が終わって 5 分後、その授業だけ「課題出た？」。いちばん思い出しやすいのは、いま
-  for (const l of plan.lessons) {
+  for (const l of asking ? plan.lessons : []) {
     const t = hhmmToMinutes(l.end) + 5;
     const slot = key(`class${l.period}`);
     if (M >= t && !sent[slot]) {
@@ -103,15 +105,17 @@ export function planNudges({ state, now = new Date() }) {
     }
   }
 
-  // 捕まえる（2）：放課後、その日の科目ごとに答え終わるまで。30 分おきに 3 回、そのあとは 1 時間おきに静かな時間まで
+  // 捕まえる（2）：放課後に 1 回だけ、まだ答えていない科目をまとめて。あとは夜 20:00 のまとめで聞く。
+  // 毎回課題が出るわけではないので、追いかけ回さない。しつこくしたいときだけ captureNag: true（30 分おき ×3 → 1 時間おき）
   const cst = captureStatus({ items, capture: st.capture, today: D, subjects });
-  if (isSchoolDay && !cst.all) {
+  if (isSchoolDay && asking && !cst.all) {
     const base = hhmmToMinutes(plan.afterSchoolAt);
-    const step = Math.max(10, +s.captureRepeatMinutes || 30), max = Math.max(1, +s.captureMax || 3);
+    const nag = s.captureNag === true;
+    const step = Math.max(10, +s.captureRepeatMinutes || 30), max = nag ? Math.max(1, +s.captureMax || 3) : 1;
     const quietFrom = hhmmToMinutes(s.quietFrom || '22:00');
     const rungs = [];
     for (let k = 0; k < max; k++) rungs.push({ name: `capture${k}`, k, at: base + step * k });
-    if (s.captureHourlyUntilQuiet !== false) {
+    if (nag && s.captureHourlyUntilQuiet !== false) {
       let t = base + step * (max - 1) + 60, j = max;
       while (t < quietFrom && j < max + 8) { rungs.push({ name: `capture${j}`, k: j, at: t }); t += 60; j++; }
     }
@@ -149,11 +153,11 @@ export function planNudges({ state, now = new Date() }) {
     if (M >= t && M < t + LATE_OK_MIN && !sent[key(name)]) {
       mark(key(name));
       const askAgainOnNone = isSchoolDay && name === 'evening';
-      const payload = discordPayload({ ...common, kind: 'evening', askAgainOnNone, classroomUrl: s.classroomUrl || undefined, captureMissing: isSchoolDay && !cst.all });
+      const payload = discordPayload({ ...common, kind: 'evening', askAgainOnNone, classroomUrl: s.classroomUrl || undefined, captureMissing: isSchoolDay && asking && !cst.all });
       const tomorrow = addDays(parseDate(D), 1);
       const left = items.filter((i) => isActive(i) && !i.done && parseDate(i.due) <= tomorrow);
       const missingRange = items.some((i) => isActive(i) && !i.range);
-      const askCapture = isSchoolDay && (!cst.all || (cst.allNone && askAgainOnNone));
+      const askCapture = isSchoolDay && asking && (!cst.all || (cst.allNone && askAgainOnNone));
       if ((left.length || askCapture || missingRange) && !(name === 'evening' && snoozed)) actions.push({ slot: key(name), kind: 'evening', payload });
     }
   }

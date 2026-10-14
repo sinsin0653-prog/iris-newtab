@@ -130,16 +130,38 @@ test('old sent markers are pruned', () => {
   assert.equal('2026-10-09:wake' in r.state.nudge.sent, true);
 });
 
-test('capture: asks after school every 30 minutes, three times, until answered', () => {
-  let state = stateWith({ nudge: { sent: { '2026-10-09:wake': 'x', '2026-10-09:soon': 'x', '2026-10-09:urgent': 'x', '2026-10-09:late0': 'x', '2026-10-09:late1': 'x', '2026-10-09:late2': 'x', '2026-10-09:late3': 'x', '2026-10-09:late4': 'x', '2026-10-09:late5': 'x' } } });
+test('capture: 放課後は 1 回だけ。追いかけ回さない（@メンションもしない）', () => {
+  const lateSent = { '2026-10-09:wake': 'x', '2026-10-09:soon': 'x', '2026-10-09:urgent': 'x', '2026-10-09:late0': 'x', '2026-10-09:late1': 'x', '2026-10-09:late2': 'x', '2026-10-09:late3': 'x', '2026-10-09:late4': 'x', '2026-10-09:late5': 'x' };
+  let state = stateWith({ nudge: { sent: { ...lateSent } } });
   const fired = [];
-  for (const t of ['15:40', '15:45', '15:50', '16:15', '16:20', '16:45', '17:15', '17:45', '18:45', '21:45']) {
+  for (const t of ['15:40', '15:45', '15:50', '16:15', '16:45', '17:45', '18:45', '21:45']) {
     const r = planNudges({ state, now: jst('2026-10-09', t) });
     state = r.state;
-    for (const a of r.actions) if (a.kind === 'capture') fired.push(`${t}=${a.slot.split(':')[1]}:${a.kind}`);
-    if (t === '16:45') assert.match(r.actions.find((a) => a.kind === 'capture').payload.content, /^<@123> まだ答えてない/);
+    for (const a of r.actions) if (a.kind === 'capture') { fired.push(`${t}=${a.slot.split(':')[1]}`); assert.doesNotMatch(a.payload.content, /<@/); }
   }
-  assert.deepEqual(fired, ['15:45=capture0:capture', '16:15=capture1:capture', '16:45=capture2:capture', '17:45=capture3:capture', '18:45=capture4:capture', '21:45=capture7:capture'], '30 分 ×3 のあとは 1 時間おき、静かな時間まで（飛ばした分はまとめない）');
+  assert.deepEqual(fired, ['15:45=capture0']);
+
+  // しつこくしたい人だけ：captureNag
+  state = stateWith({ settings: { captureNag: true }, nudge: { sent: { ...lateSent } } });
+  const nagged = [];
+  for (const t of ['15:45', '16:15', '16:45', '17:45', '21:45']) {
+    const r = planNudges({ state, now: jst('2026-10-09', t) });
+    state = r.state;
+    for (const a of r.actions) if (a.kind === 'capture') nagged.push(`${t}=${a.slot.split(':')[1]}`);
+  }
+  assert.deepEqual(nagged, ['15:45=capture0', '16:15=capture1', '16:45=capture2', '17:45=capture3', '21:45=capture7']);
+});
+
+test('capture: 時間割がサーバーにないあいだは、でたらめな科目で聞かない', () => {
+  const st = stateWith({ settings: { timetable: {} }, items: [] });
+  for (const t of ['15:46', '20:01']) {
+    const r = planNudges({ state: st, now: jst('2026-10-09', t) });
+    assert.equal(r.actions.filter((a) => a.kind === 'capture').length, 0, t);
+    for (const a of r.actions) assert.doesNotMatch(JSON.stringify(a.payload), /国語/, t);
+  }
+});
+
+test('capture: 科目ごとのボタン', () => {
   // 科目ごとの「出た／なし」
   const r = planNudges({ state: stateWith({ nudge: { sent: {} } }), now: jst('2026-10-09', '15:46') });
   const cap = r.actions.find((a) => a.kind === 'capture');

@@ -128,6 +128,12 @@ export function effectiveSchoolDays(s = {}) {
   courses.forEach((c) => { if (isSlotted(c) && out.indexOf(+c.day) < 0) out.push(+c.day); });
   return out.sort((a, b) => a - b);
 }
+/** 科目が決まっているか（履修科目か、曜日ごとの時間割）。決まっていなければ「課題出た？」は聞かない（でたらめな科目で聞かない）。 */
+export function hasSubjects(s) {
+  if (coursesOf(s).length) return true;
+  const tt = (s && s.timetable) || {};
+  return Object.keys(tt).some((k) => Array.isArray(tt[k]) && tt[k].length > 0);
+}
 export function allSubjects(s) {
   const courses = coursesOf(s);
   if (!courses.length) return SUBJECTS.slice();
@@ -232,7 +238,7 @@ export function captureWording(askNo, today, subs) {
   if (askNo === 0) return (subs.length ? subs.join('・') + '、おわった。' : '') + '課題出た？';
   if (askNo <= 1) return 'きょう、宿題出た？';
   if (askNo === 2) return `${WEEKDAYS[d.getDay()]}曜。${subs.join('・')}。どれか出た？`;
-  if (askNo === 3) return 'まだ答えてない。Classroom と連絡帳を開いて確かめて。';
+  if (askNo === 3) return 'まだ答えてない。授業のページやメモを開いて確かめて。';
   return `まだ ${subs.join('・')} が答えてない。見て押すだけ。`;
 }
 /**
@@ -294,7 +300,7 @@ export function discordPayload(props = {}) {
     title = `あしたまで ${items.length} つ。いまのうちに。`;
     est = (props.capture !== undefined || props.timetable || props.subjects) ? captureStatus({ items: live, capture: props.capture, today, timetable: props.timetable, subjects: props.subjects }) : null;
     if (est && !est.all) title = `まだ答えてない科目：${est.unanswered.join('・')}。出た？ ` + (items.length ? title : '');
-    else if (est && est.allNone && props.askAgainOnNone) title = 'きょうは全部「なし」。ほんとに？ Classroom は見た？ ' + (items.length ? title : '');
+    else if (est && est.allNone && props.askAgainOnNone) title = 'きょうは全部「なし」。ほんとに？ 授業のページは見た？ ' + (items.length ? title : '');
     else if (props.captureMissing) title = 'きょう登録ゼロ。ほんとに宿題なし？ ' + (items.length ? title : '');
     stageKey = 'evening';
   } else if (kind === 'capture') {

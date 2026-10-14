@@ -7,11 +7,13 @@ export function items() {
     { id: 'd', subject: '理科', range: 'レポート', where: 'Classroom', due: '2026-10-16', done: false, packed: false, createdAt: '2026-10-08T10:02:00Z', updatedAt: '2026-10-08T10:02:00Z' }
   ];
 }
+const SCHOOL_SUBJECTS = ['国語', '数学', '英語', '理科', '社会', 'その他'];
+const SCHOOL_WEEK = { 1: SCHOOL_SUBJECTS, 2: SCHOOL_SUBJECTS, 3: SCHOOL_SUBJECTS, 4: SCHOOL_SUBJECTS, 5: SCHOOL_SUBJECTS };
 export function stateWith(overrides = {}) {
   return {
     v: 1,
     items: items(),
-    settings: { leaveAt: '07:50', wakeAt: '06:30', quietFrom: '22:00', quietTo: '06:30', tz: 'Asia/Tokyo', escalation: 'full', snoozeMax: 3, discord: { userId: '123' }, appUrl: 'https://example.invalid/app', ...(overrides.settings || {}) },
+    settings: { leaveAt: '07:50', wakeAt: '06:30', quietFrom: '22:00', quietTo: '06:30', tz: 'Asia/Tokyo', escalation: 'full', snoozeMax: 3, discord: { userId: '123' }, appUrl: 'https://example.invalid/app', timetable: SCHOOL_WEEK, ...(overrides.settings || {}) },
     nudge: { sent: {}, snoozeUntil: null, snoozeCount: {}, ...(overrides.nudge || {}) },
     ...(overrides.items ? { items: overrides.items } : {})
   };
