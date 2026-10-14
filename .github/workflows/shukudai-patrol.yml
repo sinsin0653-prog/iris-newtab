@@ -18,4 +18,9 @@ jobs:
       - name: サーバーを起こす
         env:
           URL: https://shukudai-worker.3252327.workers.dev/api/tick
-        run: curl -fsS --retry 3 --retry-delay 5 --max-time 30 -X POST "$URL"
+        run: |
+          code=$(curl -sS -o body.txt -w '%{http_code}' --retry 3 --retry-delay 5 --max-time 30 -X POST "$URL") || exit 1
+          cat body.txt; echo
+          # 404 はサーバーのコードがまだ古い（/api/tick がない）だけ。失敗メールを 5 分おきに送らないよう、警告にとどめる
+          if [ "$code" = "404" ]; then echo "::warning::サーバーのコードが古い。worker/dist/worker.js を Cloudflare に貼り直す"; exit 0; fi
+          [ "$code" -lt 400 ]
