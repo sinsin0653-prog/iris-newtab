@@ -1,4 +1,4 @@
-// src/ の 5 つのファイルを 1 つにまとめて dist/worker.js を作る。
+// src/ のファイルを 1 つにまとめて dist/worker.js を作る。
 // Cloudflare のダッシュボード（ブラウザ）の「コードを編集」に、そのまま貼り付けられる形。
 //   node scripts/build-single.mjs
 import fs from 'node:fs';
@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const src = path.join(here, '..', 'src');
-const ORDER = ['core.js', 'state.js', 'setup-page.js', 'scheduler.js', 'discord.js', 'index.js'];
+const ORDER = ['core.js', 'state.js', 'setup-page.js', 'app-assets.js', 'scheduler.js', 'discord.js', 'index.js'];
 
 const seen = new Map();
 let body = '';
@@ -33,7 +33,8 @@ const header = `// 宿題忘れゼロ — Cloudflare Worker（1 ファイル版�
 // 使い方（ブラウザだけ）：Cloudflare → Workers & Pages → 自分の Worker →「コードを編集」→
 // 中身を全部消して、このファイルの中身を全部貼る →「デプロイ」。
 // 要るもの：KV のバインディング SHUKUDAI、シークレット DISCORD_TOKEN / DISCORD_PUBLIC_KEY / DISCORD_APP_ID / SYNC_TOKEN、
-// Cron トリガー */5 * * * *。準備ができたか、つながったかは https://<Worker の URL>/setup で見る。
+// Cron トリガー */5 * * * *（なければ GitHub Actions が /api/tick を 5 分おきに叩く）。
+// 準備ができたか、つながったかは https://<Worker の URL>/setup で見る。アプリは https://<Worker の URL>/app/
 `;
 fs.mkdirSync(path.join(here, '..', 'dist'), { recursive: true });
 fs.writeFileSync(path.join(here, '..', 'dist', 'worker.js'), header + body);

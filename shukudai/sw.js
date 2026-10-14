@@ -1,5 +1,6 @@
 // オフラインでも開けるように、画面の材料だけキャッシュする。同期 API と外のフォントは触らない。
-const VERSION = 'shukudai-v1';
+// つながるときは毎回ネットから取る（直したものがすぐ届く）。つながらないときだけキャッシュ。
+const VERSION = 'shukudai-v2';
 const SHELL = ['./', './index.html', './app.js', './app.css', './sync.js', './ds/tokens.css', './ds/bundle.css', './ds/bundle.js', './manifest.webmanifest', './icons/icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -12,9 +13,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.includes('/api/')) return;
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
+    fetch(e.request).then((res) => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then((c) => c.put(e.request, copy)); }
       return res;
-    }))
+    }).catch(() => caches.match(e.request, { ignoreSearch: true }).then((hit) => hit || caches.match('./index.html')))
   );
 });

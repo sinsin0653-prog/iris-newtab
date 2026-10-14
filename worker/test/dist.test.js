@@ -9,10 +9,14 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(here, '..', 'dist', 'worker.js');
 
-test('dist/worker.js is up to date with src/', () => {
+test('dist/worker.js is up to date with src/ and the app', () => {
+  const assets = path.join(here, '..', 'src', 'app-assets.js');
+  const beforeAssets = fs.readFileSync(assets, 'utf8');
   const before = fs.readFileSync(dist, 'utf8');
+  execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'build-assets.mjs')]);
   execFileSync(process.execPath, [path.join(here, '..', 'scripts', 'build-single.mjs')]);
-  assert.equal(fs.readFileSync(dist, 'utf8'), before, 'src/ を変えたら node scripts/build-single.mjs で作り直す');
+  assert.equal(fs.readFileSync(assets, 'utf8'), beforeAssets, 'アプリ（shukudai/）を変えたら npm run build で作り直す');
+  assert.equal(fs.readFileSync(dist, 'utf8'), before, 'src/ を変えたら npm run build で作り直す');
 });
 
 function kv() { const m = new Map(); return { m, get: async (k) => (m.has(k) ? m.get(k) : null), put: async (k, v) => { m.set(k, v); } }; }
@@ -72,4 +76,58 @@ test('setup page, health, setup API and a cron run work from the single file', a
   const after = await (await worker.fetch(new Request('https://w.example/api/health'), env, ctx)).json();
   assert.ok(after.lastRunAt, '見回った時刻が残る');
   assert.equal(after.userIdSaved, true);
+});
+
+test('アプリ本体も同じサーバーから配る（/app/）', async () => {
+  const worker = (await import(dist + '?t=' + Date.now())).default;
+  const env = { SHUKUDAI: kv(), SYNC_TOKEN: 'secret-token' };
+
+  const top = await worker.fetch(new Request('https://w.example/'), env, ctx);
+  assert.equal(top.status, 302);
+  assert.equal(top.headers.get('Location'), 'https://w.example/app/');
+  assert.equal((await worker.fetch(new Request('https://w.example/app'), env, ctx)).headers.get('Location'), 'https://w.example/app/');
+
+  const page = await worker.fetch(new Request('https://w.example/app/'), env, ctx);
+  assert.equal(page.status, 200);
+  assert.match(page.headers.get('Content-Type'), /^text\/html/);
+  const html = await page.text();
+  assert.match(html, /<meta name="shukudai-server" content="same-origin">/, 'アプリが「サーバーは自分と同じ場所」とわかる印');
+  assert.match(html, /app\.js/);
+
+  const js = await worker.fetch(new Request('https://w.example/app/ds/bundle.js'), env, ctx);
+  assert.equal(js.status, 200);
+  assert.match(js.headers.get('Content-Type'), /javascript/);
+  assert.match(await js.text(), /Shukudai/);
+
+  const png = await worker.fetch(new Request('https://w.example/app/icons/icon-192.png'), env, ctx);
+  assert.equal(png.headers.get('Content-Type'), 'image/png');
+  assert.deepEqual([...new Uint8Array(await png.arrayBuffer()).slice(0, 4)], [0x89, 0x50, 0x4e, 0x47]);
+
+  const etag = page.headers.get('ETag');
+  assert.ok(etag);
+  const again = await worker.fetch(new Request('https://w.example/app/', { headers: { 'If-None-Match': etag } }), env, ctx);
+  assert.equal(again.status, 304);
+
+  assert.equal((await worker.fetch(new Request('https://w.example/app/nope.js'), env, ctx)).status, 404);
+});
+
+test('外から起こす見回り（/api/tick）：Cron がなくても動き、4 分以内の連打は無視する', async () => {
+  const worker = (await import(dist + '?t=' + Date.now())).default;
+  const env = { SHUKUDAI: kv(), SYNC_TOKEN: 'secret-token', DISCORD_TOKEN: 'bot' };
+
+  const first = await (await worker.fetch(new Request('https://w.example/api/tick', { method: 'POST' }), env, ctx)).json();
+  assert.equal(first.ran, true);
+  const second = await (await worker.fetch(new Request('https://w.example/api/tick'), env, ctx)).json();
+  assert.equal(second.ran, false, '連打されても KV を書きすぎない');
+
+  const health = await (await worker.fetch(new Request('https://w.example/api/health'), env, ctx)).json();
+  assert.ok(health.lastRunAt);
+  assert.equal(health.lastRunVia, 'tick');
+
+  // Cron は間隔に関係なく動く
+  await worker.scheduled({ scheduledTime: Date.now() }, env, ctx);
+  const h2 = await (await worker.fetch(new Request('https://w.example/api/health'), env, ctx)).json();
+  assert.equal(h2.lastRunVia, 'cron');
+
+  assert.equal((await worker.fetch(new Request('https://w.example/api/tick'), {}, ctx)).status, 400, 'KV がなければ言葉で返す');
 });

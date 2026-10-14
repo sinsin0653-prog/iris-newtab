@@ -33,6 +33,8 @@ function load() {
     capture: st.capture && typeof st.capture === 'object' ? st.capture : {}
   };
 }
+// Worker の /app/ から開いたときは、サーバーはこのページと同じ場所。URL は自分で埋める（合言葉だけ入れればいい）
+if (!state.settings.sync.url && document.querySelector('meta[name="shukudai-server"][content="same-origin"]')) state.settings.sync.url = location.origin;
 let pushTimer = null;
 function save({ push = true } = {}) {
   try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { setStatus('端末に保存できなかった。もう一回押して'); }

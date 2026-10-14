@@ -32,6 +32,9 @@ function liveItems(state) { return state.items.filter((i) => !i.deleted); }
  * planNudges({ state, now }) → { actions: [{ slot, kind, payload }], state }
  * state.nudge.sent に送った段を記録し、同じ段を二度送らない。止まっていた時間の分をまとめて送ることはしない（最後の 1 段だけ）。
  */
+// 見回りが遅れても（外から起こす見回りは数分〜十数分ずれることがある）、この分数までなら送る。それより遅れたら古い催促は送らない
+const LATE_OK_MIN = 30;
+
 export function planNudges({ state, now = new Date() }) {
   const st = withDefaults(state);
   const s = st.settings;
@@ -96,7 +99,7 @@ export function planNudges({ state, now = new Date() }) {
     if (M >= t && !sent[slot]) {
       mark(slot);
       const one = captureStatus({ items, capture: st.capture, today: D, subjects: [l.subject] });
-      if (M - t <= 20 && !one.all) actions.push({ slot, kind: 'capture', payload: discordPayload({ ...common, kind: 'capture', subjects: [l.subject], askNo: 0 }) });
+      if (M - t <= LATE_OK_MIN && !one.all) actions.push({ slot, kind: 'capture', payload: discordPayload({ ...common, kind: 'capture', subjects: [l.subject], askNo: 0 }) });
     }
   }
 
@@ -116,7 +119,7 @@ export function planNudges({ state, now = new Date() }) {
     if (dueRungs.length) {
       const last = dueRungs[dueRungs.length - 1];
       for (const r of dueRungs) mark(key(r.name));
-      if (M - last.at <= 20) actions.push({ slot: key(last.name), kind: 'capture', payload: discordPayload({ ...common, kind: 'capture', askNo: last.k + 1 }) });
+      if (M - last.at <= LATE_OK_MIN) actions.push({ slot: key(last.name), kind: 'capture', payload: discordPayload({ ...common, kind: 'capture', askNo: last.k + 1 }) });
     }
   }
 
@@ -124,7 +127,7 @@ export function planNudges({ state, now = new Date() }) {
   if (isSchoolDay && plan.leaveSchoolAt) {
     const t = hhmmToMinutes(plan.leaveSchoolAt);
     const slot = key('leaveschool');
-    if (M >= t && M < t + 20 && !sent[slot]) {
+    if (M >= t && M < t + LATE_OK_MIN && !sent[slot]) {
       mark(slot);
       const tomorrow = addDays(parseDate(D), 1);
       const atSchool = items.filter((i) => isActive(i) && i.location === 'school' && !isPackedToday(i, D) && parseDate(i.due) <= tomorrow);
@@ -143,7 +146,7 @@ export function planNudges({ state, now = new Date() }) {
   const eveningRungs = [['evening', s.eveningAt], ['evening2', s.evening2At]];
   for (const [name, at] of eveningRungs) {
     const t = hhmmToMinutes(at);
-    if (M >= t && M < t + 20 && !sent[key(name)]) {
+    if (M >= t && M < t + LATE_OK_MIN && !sent[key(name)]) {
       mark(key(name));
       const askAgainOnNone = isSchoolDay && name === 'evening';
       const payload = discordPayload({ ...common, kind: 'evening', askAgainOnNone, classroomUrl: s.classroomUrl || undefined, captureMissing: isSchoolDay && !cst.all });
@@ -165,7 +168,7 @@ export function planNudges({ state, now = new Date() }) {
     for (const at of onlyMiddle) {
       const t = hhmmToMinutes(at);
       const slot = key(`overdue:${at}`);
-      if (M >= t && M < t + 20 && !sent[slot]) {
+      if (M >= t && M < t + LATE_OK_MIN && !sent[slot]) {
         mark(slot);
         actions.push({ slot, kind: 'overdue', payload: discordPayload({ ...common, kind: 'overdue', quietMention: newest > 1 }) });
       }

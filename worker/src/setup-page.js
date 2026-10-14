@@ -62,7 +62,7 @@ export const SETUP_HTML = String.raw`<!doctype html>
   <section aria-labelledby="h-cron">
     <h2 id="h-cron">4. 5 分おきの見回り</h2>
     <p id="cron">…</p>
-    <p class="note">Worker の「Settings」→「Trigger Events」→「Cron Triggers」に */5 * * * * を入れる。5 分たってこのページを読み直すと、時刻が出る。</p>
+    <p class="note">GitHub の見回り係が 5 分おきに起こしに来るので、何もしなくていい。Cloudflare の Worker の「Settings」→「Triggers」→「Cron Triggers」に */5 * * * * を入れると、もっと正確になる（入れなくても動く）。5 分たってこのページを読み直すと、時刻が出る。</p>
   </section>
 </main>
 <script>
@@ -80,7 +80,7 @@ export const SETUP_HTML = String.raw`<!doctype html>
     labels.forEach(function (l) { ul.appendChild(row(!!h.checks[l[0]], l[1])); });
     ul.appendChild(row(!!h.userIdSaved, '自分の Discord ユーザー ID（下の 3 で入る）'));
     $('iurl').textContent = h.interactionsUrl;
-    $('cron').textContent = h.lastRunAt ? '最後に見回った：' + new Date(h.lastRunAt).toLocaleString('ja-JP') : 'まだ一度も見回っていない。';
+    $('cron').textContent = h.lastRunAt ? '最後に見回った：' + new Date(h.lastRunAt).toLocaleString('ja-JP') + (h.lastRunVia === 'tick' ? '（GitHub の見回り係）' : h.lastRunVia === 'cron' ? '（Cloudflare の Cron）' : '') : 'まだ一度も見回っていない。';
   }).catch(function () { $('checks').textContent = '確認できなかった。Worker のコードが貼れているか見て。'; });
   $('copy').addEventListener('click', function () {
     var text = $('iurl').textContent;

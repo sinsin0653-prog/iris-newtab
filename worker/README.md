@@ -32,14 +32,15 @@ npm test
    | `DISCORD_PUBLIC_KEY` | Public Key | Developer Portal →「General Information」 |
    | `DISCORD_APP_ID` | Application ID | Developer Portal →「General Information」 |
    | `SYNC_TOKEN` | 合言葉（自分で決める、20 文字以上のでたらめな英数字） | 自分で決めて、メモしておく |
-6. **5 分おきの見回り**：「Settings」→「Trigger Events」→「Add」→「Cron Triggers」→ `*/5 * * * *`。
+6. **5 分おきの見回り**：このリポジトリの GitHub Actions（`.github/workflows/shukudai-patrol.yml`）が 5 分おきに `/api/tick` を叩くので、何もしなくていい（main ブランチに置いてあるときだけ動く。別の Worker の URL ならファイルの `URL` を書き換える）。もっと正確にしたいときは、Cloudflare の Worker の「Settings」→「Triggers」→「Cron Triggers」に `*/5 * * * *` も入れる（両方あっても、4 分以内の重複はサーバーが無視する）。
 7. **準備ページを開く**：`https://shukudai-worker.<あなたの名前>.workers.dev/setup`。ここで、
    - 1〜6 が全部「OK」になっているか見る。
    - 「Discord に貼る URL」をコピーして、Developer Portal →「General Information」→「Interactions Endpoint URL」に貼って「Save Changes」。
    - 合言葉と自分の Discord ユーザー ID を入れて「コマンドを登録して、テスト DM を送る」。DM が来たら完成。
    - 5 分後に読み直して「最後に見回った」時刻が出れば、催促も動いている。
+8. **アプリを開く**：`https://shukudai-worker.<あなたの名前>.workers.dev/app/`（トップを開いても飛ぶ）。アプリもこの Worker が配っているので、GitHub Pages などは要らない。サーバーの URL は自動で入るので、設定で合言葉だけ入れる。スマホで「ホーム画面に追加」。
 
-`src/` を変えたら `node scripts/build-single.mjs` で `dist/worker.js` を作り直す（テストが古いままだと落とす）。
+`src/` かアプリ（`shukudai/`）を変えたら `npm run build` で `src/app-assets.js` と `dist/worker.js` を作り直す（古いままだとテストが落とす）。
 
 ## ターミナルで立てる（wrangler を使う人向け）
 

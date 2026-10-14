@@ -17,6 +17,7 @@
 
 静的ファイルだけなので、どこに置いても動く。
 
+- **サーバー（worker/）から**：いちばん楽。Worker が `/app/` でこのアプリも配る（`npm run build` で中に入る）。サーバーの URL は自動で入るので、合言葉だけ入れればいい。
 - **手元で**：`npx http-server shukudai -p 8080` → http://localhost:8080/
 - **GitHub Pages**：リポジトリの Settings → Pages → Branch をこのブランチの `/ (root)` にすると `https://<user>.github.io/iris-newtab/shukudai/` で開ける。スマホの Safari / Chrome で「ホーム画面に追加」するとアプリとして入る。
 

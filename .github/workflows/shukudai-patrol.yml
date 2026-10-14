@@ -1,0 +1,21 @@
+# 宿題忘れゼロ：5 分おきにサーバー（Cloudflare Worker）を起こして、催促を送らせる。
+# Cloudflare の Cron トリガーの代わり（両方あっても、サーバー側で 4 分以内の重複は無視する）。
+# GitHub の予定実行は数分遅れることがある。サーバーは 30 分までの遅れなら催促を送る。
+name: shukudai 見回り
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+permissions: {}
+concurrency:
+  group: shukudai-patrol
+  cancel-in-progress: false
+jobs:
+  patrol:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: サーバーを起こす
+        env:
+          URL: https://shukudai-worker.3252327.workers.dev/api/tick
+        run: curl -fsS --retry 3 --retry-delay 5 --max-time 30 -X POST "$URL"

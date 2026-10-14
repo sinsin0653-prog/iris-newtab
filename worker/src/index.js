@@ -2,11 +2,14 @@
 import { planNudges } from './scheduler.js';
 import { verifyDiscordRequest, handleInteraction, DiscordRest, COMMANDS } from './discord.js';
 import { SETUP_HTML } from './setup-page.js';
+import { APP_ASSETS } from './app-assets.js';
 import { withDefaults, mergeState, emptyState } from './state.js';
 import { nudgeStage, dayPlan } from './core.js';
 import { localParts } from './scheduler.js';
 
 const KEY = 'state';
+// 外から起こす見回り（/api/tick）は、前の見回りから 4 分たっていなければ何もしない。連打されても KV を書きすぎない
+const TICK_MIN_GAP_MS = 4 * 60 * 1000;
 
 async function loadState(env) {
   const raw = await env.SHUKUDAI.get(KEY);
@@ -33,6 +36,20 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(env) });
+
+    // アプリ本体（../shukudai/ をまとめたもの）
+    if (url.pathname === '/' || url.pathname === '/app') return Response.redirect(url.origin + '/app/', 302);
+    if (url.pathname.startsWith('/app/') && request.method === 'GET') return serveAsset(request, url.pathname);
+
+    // 外から起こす見回り。Cloudflare の Cron が設定できないときに、GitHub Actions などが 5 分おきに叩く
+    if (url.pathname === '/api/tick' && (request.method === 'GET' || request.method === 'POST')) {
+      if (!env.SHUKUDAI) return json(env, { error: 'KV（SHUKUDAI）がまだつながっていない' }, 400);
+      const state = await loadState(env);
+      const last = Date.parse(state.nudge.lastRunAt || '') || 0;
+      if (Date.now() - last < TICK_MIN_GAP_MS) return json(env, { ran: false, lastRunAt: state.nudge.lastRunAt });
+      const sent = await runPatrol(env, new Date(), state, 'tick');
+      return json(env, { ran: true, sent });
+    }
 
     if (url.pathname === '/interactions' && request.method === 'POST') {
       const { valid, body } = await verifyDiscordRequest(request, env.DISCORD_PUBLIC_KEY);
@@ -83,11 +100,11 @@ export default {
     }
     if (url.pathname === '/api/health' && request.method === 'GET') {
       // 何が入っているか（あるか・ないかだけ。中身は返さない）
-      let kv = false, lastRunAt = null, userIdSaved = false;
+      let kv = false, lastRunAt = null, lastRunVia = null, userIdSaved = false;
       try {
-        if (env.SHUKUDAI) { const st = await loadState(env); kv = true; lastRunAt = st.nudge.lastRunAt || null; userIdSaved = !!st.settings.discord.userId; }
+        if (env.SHUKUDAI) { const st = await loadState(env); kv = true; lastRunAt = st.nudge.lastRunAt || null; lastRunVia = st.nudge.lastRunVia || null; userIdSaved = !!st.settings.discord.userId; }
       } catch { kv = false; }
-      return json(env, { ok: true, checks: { DISCORD_TOKEN: !!env.DISCORD_TOKEN, DISCORD_PUBLIC_KEY: !!env.DISCORD_PUBLIC_KEY, DISCORD_APP_ID: !!env.DISCORD_APP_ID, SYNC_TOKEN: !!env.SYNC_TOKEN, KV: kv }, userIdSaved, lastRunAt, interactionsUrl: url.origin + '/interactions' });
+      return json(env, { ok: true, checks: { DISCORD_TOKEN: !!env.DISCORD_TOKEN, DISCORD_PUBLIC_KEY: !!env.DISCORD_PUBLIC_KEY, DISCORD_APP_ID: !!env.DISCORD_APP_ID, SYNC_TOKEN: !!env.SYNC_TOKEN, KV: kv }, userIdSaved, lastRunAt, lastRunVia, interactionsUrl: url.origin + '/interactions' });
     }
     if (url.pathname === '/api/setup' && request.method === 'POST') {
       if (!env.SYNC_TOKEN) return json(env, { error: 'SYNC_TOKEN（合言葉）がまだ Worker に入っていない' }, 400);
@@ -122,33 +139,48 @@ export default {
       return json(env, out);
     }
 
-    if (url.pathname === '/') return new Response('shukudai worker ok\n準備は /setup を開く', { headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     return json(env, { error: 'not found' }, 404);
   },
 
   async scheduled(event, env, ctx) {
-    const state = await loadState(env);
-    const { actions, state: next } = planNudges({ state, now: new Date(event.scheduledTime || Date.now()) });
-    next.nudge.lastRunAt = new Date().toISOString(); // /setup で「見回っているか」を見せる
-    await saveState(env, next);
-    if (!actions.length) return;
-    const userId = next.settings.discord.userId;
-    const watch = next.settings.discord.watchChannelId;
-    const w = next.settings.watch || {};
-    const rest = new DiscordRest(env.DISCORD_TOKEN);
-    for (const a of actions) {
-      try {
-        if (a.toChannel) { if (watch) await rest.send(watch, a.payload); continue; }
-        if (userId) await rest.dm(userId, a.payload);
-        // 見守りチャンネル：本人が選んだものだけ。既定は良い知らせだけなので、ここに来るのは夜のまとめと出発後の催促を選んだとき
-        if (watch && a.kind === 'evening' && w.evening) await rest.send(watch, { ...a.payload, components: [], content: a.payload.embeds[0].title });
-        if (watch && w.late && /:late[3-5]$/.test(a.slot)) await rest.send(watch, { ...a.payload, components: [] });
-      } catch (e) {
-        console.error('send failed', a.slot, String(e.message || e));
-      }
-    }
+    await runPatrol(env, new Date(event.scheduledTime || Date.now()), await loadState(env), 'cron');
   }
 };
+
+/** 見回り 1 回分：送るべき催促を決めて、記録して、送る。Cron からも /api/tick からも呼ぶ。送った数を返す。 */
+async function runPatrol(env, now, state, via) {
+  const { actions, state: next } = planNudges({ state, now });
+  next.nudge.lastRunAt = new Date().toISOString(); // /setup で「見回っているか」を見せる
+  next.nudge.lastRunVia = via;
+  await saveState(env, next);
+  if (!actions.length) return 0;
+  const userId = next.settings.discord.userId;
+  const watch = next.settings.discord.watchChannelId;
+  const w = next.settings.watch || {};
+  const rest = new DiscordRest(env.DISCORD_TOKEN);
+  for (const a of actions) {
+    try {
+      if (a.toChannel) { if (watch) await rest.send(watch, a.payload); continue; }
+      if (userId) await rest.dm(userId, a.payload);
+      // 見守りチャンネル：本人が選んだものだけ。既定は良い知らせだけなので、ここに来るのは夜のまとめと出発後の催促を選んだとき
+      if (watch && a.kind === 'evening' && w.evening) await rest.send(watch, { ...a.payload, components: [], content: a.payload.embeds[0].title });
+      if (watch && w.late && /:late[3-5]$/.test(a.slot)) await rest.send(watch, { ...a.payload, components: [] });
+    } catch (e) {
+      console.error('send failed', a.slot, String(e.message || e));
+    }
+  }
+  return actions.length;
+}
+
+/** /app/ の中身を返す。変わっていなければ 304。 */
+function serveAsset(request, pathname) {
+  const a = APP_ASSETS[pathname];
+  if (!a) return new Response('not found', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+  const headers = { 'Content-Type': a.type, ETag: a.etag, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+  if (request.headers.get('If-None-Match') === a.etag) return new Response(null, { status: 304, headers });
+  const body = a.b64 ? Uint8Array.from(atob(a.b64), (c) => c.charCodeAt(0)) : a.body;
+  return new Response(body, { headers });
+}
 
 /** 良い知らせ（ぜんぶ入れた、出した）を見守りチャンネルへ。本人が watch.good を切っていれば送らない。 */
 async function postGoodNews(env, state, events) {
