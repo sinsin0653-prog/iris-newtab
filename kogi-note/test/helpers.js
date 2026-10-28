@@ -32,3 +32,38 @@ export function makeRequest(path, { method = 'GET', json, body, headers = {}, co
   }
   return new Request(`http://kogi.test${path}`, { method, headers: h, body: payload });
 }
+
+// ---- Task 3: API を呼ぶ道具と、データを直接作る道具
+import { env } from 'cloudflare:test';
+import { login } from '../src/auth.js';
+import { handleRequest } from '../src/router.js';
+
+export async function loginCookie(e = env, now = T0) {
+  const res = await login(makeRequest('/api/login', { method: 'POST', json: { password: e.APP_PASSWORD } }), e, now);
+  return res.headers.get('set-cookie').split(';')[0];
+}
+
+export async function rawCall(path, opts = {}) {
+  const cookie = opts.cookie === undefined ? await loginCookie(env) : opts.cookie;
+  return handleRequest(makeRequest(path, { ...opts, cookie }), opts.env ?? env, { ai: opts.ai ?? {}, now: opts.now ?? T0 });
+}
+
+export async function call(path, opts = {}) {
+  const res = await rawCall(path, opts);
+  const isJson = (res.headers.get('content-type') ?? '').includes('application/json');
+  return { status: res.status, body: isJson ? await res.json() : null };
+}
+
+export async function newSubject(name = '科目') {
+  const id = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO subjects (id, name, created_at) VALUES (?, ?, ?)').bind(id, name, T0).run();
+  return id;
+}
+
+export async function newLecture(fields = {}) {
+  const row = { id: crypto.randomUUID(), number: 1, date: '2026-10-28', status: 'uploading', created_at: T0, updated_at: T0, ...fields };
+  if (!row.subject_id) row.subject_id = await newSubject();
+  const cols = Object.keys(row);
+  await env.DB.prepare(`INSERT INTO lectures (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).bind(...cols.map((c) => row[c])).run();
+  return row.id;
+}
