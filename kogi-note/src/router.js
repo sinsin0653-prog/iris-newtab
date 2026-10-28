@@ -4,6 +4,8 @@ import { login, logout, isLoggedIn, checkMutation } from './auth.js';
 import * as subjects from './api/subjects.js';
 import * as lectures from './api/lectures.js';
 import * as audio from './api/audio.js';
+import * as attachments from './api/attachments.js';
+import { search } from './api/search.js';
 
 // [メソッド, パス, 処理]。後のタスクはここに足す
 const ROUTES = [
@@ -20,6 +22,11 @@ const ROUTES = [
   ['POST', '/api/lectures/:id/resummarize', lectures.resummarize],
   ['POST', '/api/lectures/:id/audio/start', audio.start],
   ['PUT', '/api/lectures/:id/audio/chunk', audio.chunk],
+  ['POST', '/api/lectures/:id/attachments', attachments.upload],
+  ['GET', '/api/attachments/:id', attachments.get],
+  ['DELETE', '/api/attachments/:id', attachments.remove],
+  ['GET', '/api/usage', attachments.usage],
+  ['GET', '/api/search', search],
 ];
 
 const compiled = ROUTES.map(([method, path, handler]) => ({
