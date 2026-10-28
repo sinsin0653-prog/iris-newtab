@@ -1,7 +1,11 @@
 // Gemini REST クライアント。キーは URL に入れず x-goog-api-key ヘッダーで送る
 import { AiError, aiErrorFromResponse } from './errors.js';
+import { NO_SPEECH, SUMMARY_SCHEMA, SUMMARY_SYSTEM, buildSummaryText, normalizeSegmentTimes, transcribePrompt, validateSummary } from './prompts.js';
 
 const FILE_TIMEOUT_MS = 120_000;
+const GENERATE_TIMEOUT_MS = 300_000;
+const BLOCKED = new Set(['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII']);
+const LABELS = { note_image: '次のファイルは自分のメモの写真です。', handout_pdf: '次のファイルはレジュメです。', handout_image: '次のファイルはレジュメです。' };
 
 export function createGemini({ apiKey, model, baseUrl, fetch }) {
   async function send(url, init = {}, timeoutMs = FILE_TIMEOUT_MS) {
@@ -57,7 +61,61 @@ export function createGemini({ apiKey, model, baseUrl, fetch }) {
     });
   }
 
+  // 返事の文字（考えた部分は除く）。答えてくれなかったときは permanent
+  async function generate(body) {
+    const res = await send(`${baseUrl}/v1beta/models/${model}:generateContent`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }, GENERATE_TIMEOUT_MS);
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new AiError('temporary', 'Gemini の返事が読めませんでした');
+    }
+    const block = data?.promptFeedback?.blockReason;
+    if (block) throw new AiError('permanent', `AI が答えてくれませんでした（${block}）`);
+    const cand = data?.candidates?.[0];
+    if (!cand) throw new AiError('permanent', 'AI が答えてくれませんでした（返事なし）');
+    if (BLOCKED.has(cand.finishReason)) throw new AiError('permanent', `AI が答えてくれませんでした（${cand.finishReason}）`);
+    if (cand.finishReason === 'MAX_TOKENS') throw new AiError('permanent', '答えが長すぎて途中で切れました');
+    const text = (cand.content?.parts ?? []).filter((p) => !p.thought && typeof p.text === 'string').map((p) => p.text).join('').trim();
+    if (!text) throw new AiError('permanent', 'AI の返事が空でした');
+    return text;
+  }
+
   return {
+    async transcribeSegment({ fileUri, mime, startSec, endSec }) {
+      const text = await generate({
+        contents: [{ role: 'user', parts: [{ file_data: { mime_type: mime, file_uri: fileUri } }, { text: transcribePrompt(startSec, endSec) }] }],
+        generationConfig: { temperature: 0, maxOutputTokens: 65536 },
+      });
+      if (text === NO_SPEECH) return '';
+      return normalizeSegmentTimes(text, startSec);
+    },
+
+    async summarize({ transcript, noteText, attachments }) {
+      const parts = [];
+      for (const a of attachments) {
+        parts.push({ text: LABELS[a.kind] ?? '次のファイルはレジュメです。' });
+        parts.push({ file_data: { mime_type: a.mime, file_uri: a.fileUri } });
+      }
+      parts.push({ text: buildSummaryText({ transcript, noteText }) });
+      const text = await generate({
+        systemInstruction: { parts: [{ text: SUMMARY_SYSTEM }] },
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: SUMMARY_SCHEMA, maxOutputTokens: 65536 },
+      });
+      let value;
+      try {
+        value = JSON.parse(text);
+      } catch {
+        throw new AiError('permanent', '要約の形がちがいます（JSON ではありません）');
+      }
+      return validateSummary(value);
+    },
+
     startAudioUpload: startUpload,
 
     async uploadAudioChunk(args) {
