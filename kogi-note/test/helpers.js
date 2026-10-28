@@ -83,3 +83,9 @@ export function fakeFetch(handler) {
 }
 
 export const g = (fetch) => createGemini({ apiKey: 'KEY', model: 'm', baseUrl: 'https://gem.test', fetch });
+
+// ---- Task 8: 見回りのテスト用
+export const processingLecture = (fields = {}) =>
+  newLecture({ status: 'processing', step: 'wait_file', audio_mime: 'audio/mp4', audio_file_name: 'files/a', audio_file_uri: 'u/a', audio_expires_at: T0 + 172800000, ...fields });
+
+export const row = (id) => env.DB.prepare('SELECT * FROM lectures WHERE id = ?').bind(id).first();
