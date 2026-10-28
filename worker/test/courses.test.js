@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { dayPlan, daySubjects, askableSubjects, effectiveTimetable, effectiveSchoolDays, nextLesson, submitPlace, nextClass, captureWording } from '../src/core.js';
+import { toISO, dayPlan, daySubjects, askableSubjects, effectiveTimetable, effectiveSchoolDays, nextLesson, submitPlace, nextClass, captureWording } from '../src/core.js';
 import { planNudges } from '../src/scheduler.js';
 import { handleInteraction } from '../src/discord.js';
 import { jst, uniCourses, uniState } from './helpers.js';
@@ -117,4 +117,43 @@ test('after the first class starts, no more "you are late leaving" messages', ()
     for (const a of r.actions) if (a.kind === 'morning') fired.push(`${t}=${a.slot.split(':')[1]}`);
   }
   assert.deepEqual(fired, ['08:40=late0', '08:50=late1'], '9:00 の授業が始まったら止まる');
+});
+
+// ---- 授業の日付（出欠表から取り出した、実際に授業がある日）----
+const DATED = {
+  courses: [
+    { name: '統計学 I', short: '統計学', day: 1, period: 1, room: 'A-101', dates: ['2026-10-19', '2026-11-02', '2026-11-09'] }, // 10/26 は授業なし
+    { name: '英語演習 II', short: '英語演習', day: 2, period: 4, room: 'C-301', dates: ['2026-10-20', '2026-10-27'] },
+    { name: '英語演習 II', short: '英語演習', day: 4, period: 2, room: 'C-302', dates: ['2026-10-22', '2026-10-29'] },
+    { name: 'ゼミ', short: 'ゼミ', day: 5, period: 5, room: 'D-401' } // 日付なし＝毎週
+  ],
+  commuteMinutes: 60
+};
+
+test('日付つきの授業：その日付だけ授業がある（曜日が同じでも、日付になければ休み）', () => {
+  assert.equal(dayPlan(new Date(2026, 9, 19), DATED).school, true, '10/19（月）はある');
+  assert.equal(dayPlan(new Date(2026, 9, 26), DATED).school, false, '10/26（月）は授業なし');
+  assert.equal(dayPlan(new Date(2026, 9, 26), DATED).lessons.length, 0);
+  assert.equal(dayPlan('2026-11-02', DATED).school, true, '文字列の日付でもいい');
+  assert.equal(dayPlan(1, DATED).school, true, '曜日の数字だけなら、いままで通り（日付は見ない）');
+  assert.equal(dayPlan(new Date(2026, 9, 30), DATED).school, true, '日付のないゼミは毎週');
+});
+
+test('日付つきの授業：「次のその授業」は、実際の次の授業の日', () => {
+  const tt = effectiveTimetable(DATED);
+  assert.equal(toISO(nextLesson('統計学', '2026-10-19', tt, effectiveSchoolDays(DATED)).date), '2026-11-02', '10/26 を飛ばす');
+  assert.equal(toISO(nextLesson('英語演習', '2026-10-22', tt, effectiveSchoolDays(DATED)).date), '2026-10-27', '火と木のどちらか近い方');
+  assert.equal(toISO(nextLesson('ゼミ', '2026-10-23', tt, effectiveSchoolDays(DATED)).date), '2026-10-30', '日付なしは毎週');
+  const after = nextLesson('統計学', '2026-11-09', tt, effectiveSchoolDays(DATED));
+  assert.equal(after.lesson, false, '日付がもうない授業は、「次の学校の日」にする');
+});
+
+test('日付つきの授業：授業のない日は、朝の催促も課題の質問もしない', () => {
+  const st = { v: 1, items: [], settings: { leaveAt: '07:50', wakeAt: '06:30', quietFrom: '22:00', quietTo: '06:30', tz: 'Asia/Tokyo', escalation: 'full', snoozeMax: 3, discord: { userId: '123' }, ...DATED }, nudge: { sent: {} }, capture: {} };
+  for (const t of ['07:10', '15:30', '17:50']) {
+    const r = planNudges({ state: st, now: jst('2026-10-26', t) });
+    assert.equal(r.actions.filter((a) => a.kind === 'capture' || a.kind === 'morning').length, 0, `10/26 ${t}`);
+  }
+  const ok = planNudges({ state: st, now: jst('2026-10-19', '10:36') });
+  assert.ok(ok.actions.some((a) => a.kind === 'capture'), '授業のある日 10/19 は、授業のあとに聞く');
 });

@@ -78,3 +78,22 @@ test('course schedule helpers agree', async () => {
   assert.deepEqual(core.dayPlan(1, {}), S.dayPlan(1, {}));
   assert.deepEqual(core.daySubjects('2026-10-12', {}), S.daySubjects('2026-10-12', {}));
 });
+
+test('日付つきの授業：dayPlan と nextLesson が bundle とサーバーで同じ', () => {
+  const s = { courses: [
+    { name: '統計学 I', short: '統計学', day: 1, period: 1, room: 'A-101', dates: ['2026-10-19', '2026-11-02'] },
+    { name: '英語演習', short: '英語演習', day: 2, period: 4, room: 'C-301', dates: ['2026-10-20', '2026-10-27'] },
+    { name: 'ゼミ', short: 'ゼミ', day: 5, period: 5, room: 'D-401' }
+  ] };
+  for (const iso of ['2026-10-19', '2026-10-20', '2026-10-26', '2026-10-27', '2026-10-30', '2026-11-02', '2026-11-09']) {
+    const d = new Date(+iso.slice(0, 4), +iso.slice(5, 7) - 1, +iso.slice(8, 10));
+    assert.deepEqual(core.dayPlan(d, s), S.dayPlan(d, s), 'dayPlan ' + iso);
+    assert.deepEqual(core.dayPlan(iso, s), S.dayPlan(iso, s), 'dayPlan(str) ' + iso);
+  }
+  assert.deepEqual(core.effectiveTimetable(s), S.effectiveTimetable(s));
+  for (const sub of ['統計学', '英語演習', 'ゼミ']) for (const t of ['2026-10-19', '2026-10-27', '2026-11-02', '2026-11-20']) {
+    const a = core.nextLesson(sub, t, core.effectiveTimetable(s), core.effectiveSchoolDays(s));
+    const b = S.nextLesson(sub, t, S.effectiveTimetable(s), S.effectiveSchoolDays(s));
+    assert.deepEqual({ d: core.toISO(a.date), l: a.lesson }, { d: S.toISO ? S.toISO(b.date) : core.toISO(b.date), l: b.lesson }, `${sub} ${t}`);
+  }
+});

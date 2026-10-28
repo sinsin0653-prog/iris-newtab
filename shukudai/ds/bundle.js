@@ -265,6 +265,13 @@
   function nextLesson(subject, today, timetable, schoolDays) {
     var t = parseDate(today || new Date());
     var tt = timetable || {};
+    var dated = tt.__dates && tt.__dates[subject]; // 授業のある日の一覧（出欠表から）があれば、それが正しい
+    if (dated && dated.length) {
+      var t0 = toISO(t);
+      var hit = dated.filter(function (x) { return x > t0; }).sort()[0];
+      if (hit) return { date: parseDate(hit), lesson: true };
+      return { date: nextSchoolDay(t, schoolDays), lesson: false };
+    }
     for (var k = 1; k <= 14; k++) {
       var d = addDays(t, k);
       var list = tt[String(d.getDay())];
@@ -285,15 +292,20 @@
    * → { hasCourses, school, lessons: [{ subject, name, period, room, teacher, start, end }], leaveAt, afterSchoolAt, leaveSchoolAt }
    * 出る時間 = 最初の授業の開始 − 通学時間（commuteMinutes、既定 60 分）。放課後 = 最後の授業の終わり + 30 分。
    */
-  function dayPlan(dow, s) {
+  function meetsOn(c, iso) { return !iso || !Array.isArray(c.dates) || c.dates.length === 0 || c.dates.indexOf(iso) >= 0; }
+  function dayPlan(dowOrDate, s) {
     s = s || {};
+    // 曜日の数字のほかに、日付（Date か 'YYYY-MM-DD'）も渡せる。日付つきの授業（dates）はその日付のときだけ授業になる
+    var when = (dowOrDate instanceof Date || typeof dowOrDate === 'string') ? parseDate(dowOrDate) : null;
+    var dow = when ? when.getDay() : dowOrDate;
+    var iso = when ? toISO(when) : null;
     var courses = coursesOf(s);
     if (!courses.length) {
       var days = Array.isArray(s.schoolDays) && s.schoolDays.length ? s.schoolDays : [1, 2, 3, 4, 5];
       return { hasCourses: false, school: days.indexOf(dow) >= 0, lessons: [], leaveAt: s.leaveAt || '07:50', afterSchoolAt: (s.afterSchoolByDay || {})[dow] || s.afterSchoolAt || '15:45', leaveSchoolAt: s.leaveSchoolAt || '16:30' };
     }
     var periods = s.periods || DEFAULT_PERIODS;
-    var lessons = courses.filter(function (c) { return isSlotted(c) && +c.day === dow && periods[c.period] && hm(periods[c.period][0]) !== null; }).map(function (c) {
+    var lessons = courses.filter(function (c) { return isSlotted(c) && +c.day === dow && meetsOn(c, iso) && periods[c.period] && hm(periods[c.period][0]) !== null; }).map(function (c) {
       return { subject: courseName(c), name: c.name || courseName(c), period: +c.period, room: c.room || '', teacher: c.teacher || '', start: periods[c.period][0], end: periods[c.period][1] };
     }).sort(function (a, b) { return a.period - b.period; });
     if (!lessons.length) return { hasCourses: true, school: false, lessons: [], leaveAt: null, afterSchoolAt: null, leaveSchoolAt: null };
@@ -314,6 +326,7 @@
       var k = String(+c.day), n = courseName(c);
       tt[k] = tt[k] || [];
       if (tt[k].indexOf(n) < 0) tt[k].push(n);
+      if (Array.isArray(c.dates) && c.dates.length) { tt.__dates = tt.__dates || {}; tt.__dates[n] = (tt.__dates[n] || []).concat(c.dates); }
     });
     return tt;
   }
@@ -340,7 +353,7 @@
     var d = parseDate(today || new Date());
     var courses = coursesOf(s);
     if (!courses.length) return captureSubjects({ today: d, timetable: s.timetable });
-    var plan = dayPlan(d.getDay(), s);
+    var plan = dayPlan(d, s);
     var out = [];
     plan.lessons.forEach(function (l) { if (out.indexOf(l.subject) < 0) out.push(l.subject); });
     var days = effectiveSchoolDays(s);
@@ -352,7 +365,7 @@
     s = s || {};
     var d = parseDate(today || new Date());
     if (!coursesOf(s).length) return daySubjects(d, s);
-    var plan = dayPlan(d.getDay(), s);
+    var plan = dayPlan(d, s);
     if (!plan.school) return [];
     if (minutes >= hm(plan.afterSchoolAt)) return daySubjects(d, s);
     var out = [];
@@ -362,7 +375,7 @@
   /** その日のその科目の授業。 */
   function lessonOn(subject, date, s) {
     var d = parseDate(date);
-    var plan = dayPlan(d.getDay(), s);
+    var plan = dayPlan(d, s);
     for (var i = 0; i < plan.lessons.length; i++) if (plan.lessons[i].subject === subject) return plan.lessons[i];
     return null;
   }
@@ -374,7 +387,7 @@
   /** いま（授業中）か、つぎの授業。きょうもう無ければ null。 */
   function nextClass(now, s) {
     var n = toNow(now);
-    var plan = dayPlan(n.getDay(), s);
+    var plan = dayPlan(n, s);
     var m = n.getHours() * 60 + n.getMinutes();
     for (var i = 0; i < plan.lessons.length; i++) {
       var l = plan.lessons[i];

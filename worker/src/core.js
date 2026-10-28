@@ -73,6 +73,13 @@ export function nextSchoolDay(today, schoolDays) {
 export function nextLesson(subject, today, timetable, schoolDays) {
   const t = parseDate(today || new Date());
   const tt = timetable || {};
+  const dated = tt.__dates && tt.__dates[subject]; // 授業のある日の一覧（出欠表から）があれば、それが正しい
+  if (dated && dated.length) {
+    const t0 = toISO(t);
+    const hit = dated.filter((x) => x > t0).sort()[0];
+    if (hit) return { date: parseDate(hit), lesson: true };
+    return { date: nextSchoolDay(t, schoolDays), lesson: false };
+  }
   for (let k = 1; k <= 14; k++) {
     const d = addDays(t, k);
     const list = tt[String(d.getDay())];
@@ -87,17 +94,23 @@ function hm(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); return m ? +m[1]
 export function hhmmOf(min) { min = ((Math.round(min) % 1440) + 1440) % 1440; const h = Math.floor(min / 60), m = min % 60; return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`; }
 function courseName(c) { return (c && (c.short || c.name)) || ''; }
 function isSlotted(c) { return !!c && c.day !== null && c.day !== undefined && c.day !== '' && !!c.period; }
+/** その日に授業があるか。dates（授業のある日の一覧）がある授業は、その日付だけ。ない授業は毎週。 */
+function meetsOn(c, iso) { return !iso || !Array.isArray(c.dates) || c.dates.length === 0 || c.dates.indexOf(iso) >= 0; }
 function coursesOf(s) { return s && Array.isArray(s.courses) ? s.courses.filter((c) => c && courseName(c)) : []; }
 /** その曜日の予定。出る時間 = 最初の授業の開始 − 通学時間（既定 60 分）。放課後 = 最後の授業の終わり + 30 分。 */
-export function dayPlan(dow, s = {}) {
+export function dayPlan(dowOrDate, s = {}) {
   s = s || {};
+  // 曜日の数字のほかに、日付（Date か 'YYYY-MM-DD'）も渡せる。日付を渡すと、日付つきの授業（dates）はその日付のときだけ授業になる
+  const when = (dowOrDate instanceof Date || typeof dowOrDate === 'string') ? parseDate(dowOrDate) : null;
+  const dow = when ? when.getDay() : dowOrDate;
+  const iso = when ? toISO(when) : null;
   const courses = coursesOf(s);
   if (!courses.length) {
     const days = Array.isArray(s.schoolDays) && s.schoolDays.length ? s.schoolDays : [1, 2, 3, 4, 5];
     return { hasCourses: false, school: days.indexOf(dow) >= 0, lessons: [], leaveAt: s.leaveAt || '07:50', afterSchoolAt: (s.afterSchoolByDay || {})[dow] || s.afterSchoolAt || '15:45', leaveSchoolAt: s.leaveSchoolAt || '16:30' };
   }
   const periods = s.periods || DEFAULT_PERIODS;
-  const lessons = courses.filter((c) => isSlotted(c) && +c.day === dow && periods[c.period] && hm(periods[c.period][0]) !== null).map((c) => (
+  const lessons = courses.filter((c) => isSlotted(c) && +c.day === dow && meetsOn(c, iso) && periods[c.period] && hm(periods[c.period][0]) !== null).map((c) => (
     { subject: courseName(c), name: c.name || courseName(c), period: +c.period, room: c.room || '', teacher: c.teacher || '', start: periods[c.period][0], end: periods[c.period][1] }
   )).sort((a, b) => a.period - b.period);
   if (!lessons.length) return { hasCourses: true, school: false, lessons: [], leaveAt: null, afterSchoolAt: null, leaveSchoolAt: null };
@@ -117,6 +130,7 @@ export function effectiveTimetable(s = {}) {
     const k = String(+c.day), n = courseName(c);
     tt[k] = tt[k] || [];
     if (tt[k].indexOf(n) < 0) tt[k].push(n);
+    if (Array.isArray(c.dates) && c.dates.length) { tt.__dates = tt.__dates || {}; tt.__dates[n] = (tt.__dates[n] || []).concat(c.dates); }
   });
   return tt;
 }
@@ -147,7 +161,7 @@ export function daySubjects(today, s = {}) {
   const d = parseDate(today || new Date());
   const courses = coursesOf(s);
   if (!courses.length) return captureSubjects({ today: d, timetable: s.timetable });
-  const plan = dayPlan(d.getDay(), s);
+  const plan = dayPlan(d, s);
   const out = [];
   plan.lessons.forEach((l) => { if (out.indexOf(l.subject) < 0) out.push(l.subject); });
   const days = effectiveSchoolDays(s);
@@ -159,7 +173,7 @@ export function askableSubjects(today, minutes, s = {}) {
   s = s || {};
   const d = parseDate(today || new Date());
   if (!coursesOf(s).length) return daySubjects(d, s);
-  const plan = dayPlan(d.getDay(), s);
+  const plan = dayPlan(d, s);
   if (!plan.school) return [];
   if (minutes >= hm(plan.afterSchoolAt)) return daySubjects(d, s);
   const out = [];
@@ -168,7 +182,7 @@ export function askableSubjects(today, minutes, s = {}) {
 }
 export function lessonOn(subject, date, s) {
   const d = parseDate(date);
-  const plan = dayPlan(d.getDay(), s);
+  const plan = dayPlan(d, s);
   return plan.lessons.find((l) => l.subject === subject) || null;
 }
 export function submitPlace(subject, due, s) {
@@ -177,7 +191,7 @@ export function submitPlace(subject, due, s) {
 }
 export function nextClass(now, s) {
   const n = toNow(now);
-  const plan = dayPlan(n.getDay(), s);
+  const plan = dayPlan(n, s);
   const m = n.getHours() * 60 + n.getMinutes();
   for (const l of plan.lessons) if (hm(l.end) > m) return { lesson: l, during: hm(l.start) <= m };
   return null;

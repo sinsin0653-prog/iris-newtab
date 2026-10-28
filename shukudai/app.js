@@ -120,7 +120,7 @@ function minutesNow(d = new Date()) { return d.getHours() * 60 + d.getMinutes();
 function hhmm(t) { const m = /^(\d{1,2}):(\d{2})$/.exec(t || ''); return m ? +m[1] * 60 + +m[2] : 0; }
 const hasCourses = (s = state.settings) => Array.isArray(s.courses) && s.courses.length > 0;
 /** その日の予定（履修科目があれば、曜日ごとの出る時間・放課後・授業） */
-function planFor(d = new Date()) { return S.dayPlan(d.getDay(), state.settings); }
+function planFor(d = new Date()) { return S.dayPlan(d, state.settings); }
 function leaveToday() { return planFor().leaveAt || state.settings.leaveAt; }
 /**
  * 「課題出た？」を出すか。
@@ -342,9 +342,9 @@ function weekDays() {
 function weekGrid(big) {
   const today = todayISO();
   return h('div', { className: 'week' + (big ? ' week--big' : '') }, weekDays().map(({ d, key, items }, k) =>
-    h('section', { className: 'week__day' + (k === 0 ? ' is-today' : '') + (!S.dayPlan(d.getDay(), state.settings).school ? ' is-off' : '') },
+    h('section', { className: 'week__day' + (k === 0 ? ' is-today' : '') + (!S.dayPlan(d, state.settings).school ? ' is-off' : '') },
       h('p', { className: 'week__date', text: (k === 0 ? 'きょう ' : k === 1 ? 'あした ' : '') + S.formatDate(d) }),
-      (() => { const ls = S.dayPlan(d.getDay(), state.settings).lessons; return ls.length ? h('p', { className: 'week__classes', text: ls.map((l) => l.period + '限 ' + l.subject + (l.room ? ' ' + l.room : '')).join('　') }) : null; })(),
+      (() => { const ls = S.dayPlan(d, state.settings).lessons; return ls.length ? h('p', { className: 'week__classes', text: ls.map((l) => l.period + '限 ' + l.subject + (l.room ? ' ' + l.room : '')).join('　') }) : null; })(),
       items.length ? h('div', { className: 'week__items' }, items.map((i) => h('div', { className: 'week__item' + (i.done ? ' is-done' : '') }, S.SubjectTag({ subject: i.subject }), h('span', { className: 'week__range', text: i.range || '範囲？' }), S.DueChip({ due: i.due, today, done: i.done, flags: { packed: i.packed } })))) : h('p', { className: 'week__empty', text: 'なし' })
     )));
 }
@@ -423,7 +423,9 @@ function parseCoursesText(text) {
     const period = c.period === null || c.period === undefined || c.period === '' ? null : +c.period;
     if (period !== null && !(period >= 1 && period <= 8)) throw new Error(c.name + ' の period（時限）がおかしい');
     const str = (v, n) => (typeof v === 'string' || typeof v === 'number') ? String(v).trim().slice(0, n) : '';
-    return { name: str(c.name, 80), short: str(c.short, 30) || str(c.name, 30), day, period: day === null ? null : period, room: str(c.room, 30), teacher: str(c.teacher, 40), code: str(c.code, 20), credits: +c.credits || null, required: !!c.required };
+    // 授業のある日（YYYY-MM-DD の一覧）。あれば、その日だけ授業。なければ毎週
+    const dates = Array.isArray(c.dates) ? [...new Set(c.dates.filter((x) => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x)))].sort() : [];
+    return { name: str(c.name, 80), short: str(c.short, 30) || str(c.name, 30), day, period: day === null ? null : period, room: str(c.room, 30), teacher: str(c.teacher, 40), code: str(c.code, 20), credits: +c.credits || null, required: !!c.required, ...(day !== null && dates.length ? { dates } : {}) };
   });
   const out = { courses };
   if (data && data.periods && typeof data.periods === 'object') {

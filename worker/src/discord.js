@@ -142,7 +142,7 @@ export async function handleInteraction(interaction, ctx) {
     const nowIso = (ctx.now || new Date()).toISOString();
     return { id: 'hw_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), subject, range, rangeMissing: !range, where, location: /classroom|タブレット|lms|moodle|メール/i.test(where) ? 'online' : (where ? 'bag' : null), submitTo: submitPlace(subject, due, s), due, done: false, packed: false, createdAt: nowIso, createdOn: D, updatedAt: nowIso };
   };
-  const plan = dayPlan(lp.local.getDay(), s);
+  const plan = dayPlan(lp.local, s);
   const leaveAt = plan.leaveAt || s.leaveAt;
   const dueCtx = (subject) => ({ subject, timetable: effectiveTimetable(s), schoolDays: effectiveSchoolDays(s) });
   // いま聞いていい科目（授業が終わったもの。放課後を過ぎたらその日の全部）の答えぐあい

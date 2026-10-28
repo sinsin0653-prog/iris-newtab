@@ -59,7 +59,7 @@ export function planNudges({ state, now = new Date() }) {
   const items = liveItems(st);
   const dow = lp.local.getDay();
   // その日の予定（履修科目があれば、曜日ごとの出る時間・放課後・授業の終わり）
-  const plan = dayPlan(dow, s);
+  const plan = dayPlan(lp.local, s);
   const isSchoolDay = plan.school;
   const leaveAt = plan.leaveAt || s.leaveAt;
   const leaveMin = hhmmToMinutes(leaveAt);
