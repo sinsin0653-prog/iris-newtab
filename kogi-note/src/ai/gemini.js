@@ -4,11 +4,14 @@ import { NO_SPEECH, SUMMARY_SCHEMA, SUMMARY_SYSTEM, buildSummaryText, normalizeS
 
 const FILE_TIMEOUT_MS = 120_000;
 const GENERATE_TIMEOUT_MS = 300_000;
+// かけらはブラウザの回線の速さで流れてくるので、ゆっくりなスマホの回線でも切らない
+export const CHUNK_TIMEOUT_MS = 900_000;
 const BLOCKED = new Set(['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII']);
 const LABELS = { note_image: '次のファイルは自分のメモの写真です。', handout_pdf: '次のファイルはレジュメです。', handout_image: '次のファイルはレジュメです。' };
 
-export function createGemini({ apiKey, model, baseUrl, fetch }) {
-  async function send(url, init = {}, timeoutMs = FILE_TIMEOUT_MS) {
+export function createGemini({ apiKey, model, baseUrl, fetch, timeouts = {} }) {
+  const limits = { file: FILE_TIMEOUT_MS, chunk: CHUNK_TIMEOUT_MS, generate: GENERATE_TIMEOUT_MS, ...timeouts };
+  async function send(url, init = {}, timeoutMs = limits.file) {
     let res;
     try {
       res = await fetch(url, {
@@ -58,7 +61,7 @@ export function createGemini({ apiKey, model, baseUrl, fetch }) {
         'X-Goog-Upload-Command': isLast ? 'upload, finalize' : 'upload',
       },
       body,
-    });
+    }, limits.chunk);
   }
 
   // 返事の文字（考えた部分は除く）。答えてくれなかったときは permanent
@@ -67,7 +70,7 @@ export function createGemini({ apiKey, model, baseUrl, fetch }) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    }, GENERATE_TIMEOUT_MS);
+    }, limits.generate);
     let data;
     try {
       data = await res.json();

@@ -79,7 +79,8 @@ export async function chunk({ request, env, ai, params, url, now }) {
   }
   if (row.status !== 'uploading' || !row.audio_upload_url) throw new HttpError(409, 'not_uploading', 'いまは音声を受け取れません');
   if (offset !== row.audio_upload_offset) {
-    const real = await ai.queryUploadOffset({ uploadUrl: row.audio_upload_url }).catch(() => row.audio_upload_offset);
+    let real = await ai.queryUploadOffset({ uploadUrl: row.audio_upload_url }).catch(() => row.audio_upload_offset);
+    if (!Number.isInteger(real) || real < 0 || real >= row.audio_size) real = row.audio_upload_offset;
     await run(env.DB, 'UPDATE lectures SET audio_upload_offset = ? WHERE id = ?', real, row.id);
     throw new HttpError(409, 'offset_mismatch', '送る位置がずれました', { expected_offset: real });
   }

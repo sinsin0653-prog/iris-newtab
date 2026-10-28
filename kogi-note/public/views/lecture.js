@@ -1,10 +1,12 @@
 import { h, errorText } from '../lib/dom.js';
 import { apiFetch } from '../api.js';
-import { statusLabel, isWorking } from '../lib/status.js';
+import { statusLabel, isWorking, reuploadWarning } from '../lib/status.js';
 import { parseTranscript, parseTime, nearestLineIndex, formatTime } from '../lib/time.js';
 import { uploadAudio, uploadAttachment, kindOf } from '../upload.js';
 
 const POLL_MS = 10000;
+// 音声が要るときだけ目立たせる（要約のエラーではまず「やり直す」）
+const l2class = (l) => (l.needs_audio ? 'primary' : '');
 const TABS = [['summary', '要約'], ['transcript', '文字起こし'], ['notes', 'メモ・レジュメ']];
 
 export async function render(root, [lectureId]) {
@@ -46,7 +48,12 @@ export async function render(root, [lectureId]) {
       }
       await load();
     });
-    return h('span', {}, h('button', { type: 'button', class: 'primary', onclick: () => input.click() }, '音声を入れ直す'), input, bar);
+    const onclick = () => {
+      const warning = reuploadWarning(lecture);
+      if (warning && !confirm(warning)) return;
+      input.click();
+    };
+    return h('span', {}, h('button', { type: 'button', class: l2class(lecture), onclick }, '音声を入れ直す'), input, bar);
   }
 
   function renderHead() {

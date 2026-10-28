@@ -40,7 +40,10 @@ export async function login(request, env, now) {
   }
 }
 
+const configured = (env) => typeof env.APP_PASSWORD === 'string' && env.APP_PASSWORD !== '' && typeof env.SESSION_SECRET === 'string' && env.SESSION_SECRET !== '';
+
 async function tryLogin(request, env, now) {
+  if (!configured(env)) throw new HttpError(500, 'not_configured', '設定が足りません（APP_PASSWORD と SESSION_SECRET を入れてね）');
   const db = env.DB;
   await db.prepare('DELETE FROM login_failures WHERE ts <= ?').bind(now - LOCK_WINDOW_MS).run();
   const { n } = await db.prepare('SELECT count(*) AS n FROM login_failures').first();
@@ -66,6 +69,7 @@ export function logout() {
 }
 
 export async function isLoggedIn(request, env, now) {
+  if (!configured(env)) return false;
   const value = readCookie(request);
   const m = value && /^(\d+)\.([0-9a-f]{64})$/.exec(value);
   if (!m) return false;

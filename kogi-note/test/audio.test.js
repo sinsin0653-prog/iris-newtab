@@ -154,3 +154,13 @@ it('chunk over 100MB, missing length or past the end is 400', async () => {
   expect(ai.log.filter((l) => l[0] === 'chunk')).toEqual([]);
   expect(MAX_CHUNK_BYTES).toBe(104857600);
 });
+
+it('an out-of-range offset from Gemini on mismatch keeps the stored offset', async () => {
+  const ai = fakeAi({ queryUploadOffset: async () => 99 });
+  const id = await newLecture();
+  await start(id, ai);
+  const r = await put(id, ai, 6, 4);
+  expect(r.status).toBe(409);
+  expect(r.body.error.expected_offset).toBe(0);
+  expect((await row(id)).audio_upload_offset).toBe(0);
+});

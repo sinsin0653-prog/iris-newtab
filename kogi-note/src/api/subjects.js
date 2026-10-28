@@ -1,7 +1,7 @@
 // 科目の API
 import { HttpError, json, readJson } from '../http.js';
 import { all, first, run } from '../db.js';
-import { deleteLecture } from './lectures.js';
+import { deleteStatements } from './lectures.js';
 
 function cleanName(value) {
   const name = typeof value === 'string' ? value.trim() : '';
@@ -39,11 +39,12 @@ export async function rename({ request, env, params }) {
   return json({ id: params.id, name });
 }
 
-export async function remove({ env, ai, params }) {
+export async function remove({ env, params, now }) {
   await mustExist(env, params.id);
-  const ids = await all(env.DB, 'SELECT id FROM lectures WHERE subject_id = ?', params.id);
-  for (const { id } of ids) await deleteLecture(env, ai, id);
-  await run(env.DB, 'DELETE FROM subjects WHERE id = ?', params.id);
+  await env.DB.batch([
+    ...deleteStatements(env, 'subject_id = ?', params.id, now),
+    env.DB.prepare('DELETE FROM subjects WHERE id = ?').bind(params.id),
+  ]);
   return json({ ok: true });
 }
 

@@ -121,31 +121,22 @@ export async function patch({ request, env, params, now }) {
   return json({ lecture: await view(env, params.id, now) });
 }
 
-const ignore = async (p) => {
-  try {
-    await p;
-  } catch {
-    // Gemini のファイルは 48 時間で消えるので、消せなくても先に進む
-  }
-};
-
-export async function deleteLecture(env, ai, id) {
-  const row = await first(env.DB, 'SELECT audio_file_name FROM lectures WHERE id = ?', id);
-  if (!row) return;
-  const atts = await all(env.DB, 'SELECT kv_key, gemini_file_name FROM attachments WHERE lecture_id = ?', id);
-  const names = [row.audio_file_name, ...atts.map((a) => a.gemini_file_name)].filter(Boolean);
-  await Promise.all(names.map((fileName) => ignore(ai.deleteFile({ fileName }))));
-  await Promise.all(atts.map((a) => env.FILES.delete(a.kv_key)));
-  await env.DB.batch([
-    env.DB.prepare('DELETE FROM segments WHERE lecture_id = ?').bind(id),
-    env.DB.prepare('DELETE FROM attachments WHERE lecture_id = ?').bind(id),
-    env.DB.prepare('DELETE FROM lectures WHERE id = ?').bind(id),
-  ]);
+// 行は D1 の 1 回の batch で消し、KV と Gemini の後片づけは trash に積んで見回りに任せる
+// （授業がたくさんある科目を消しても、サブリクエスト上限の 50 を超えないように）
+export function deleteStatements(env, where, param, now) {
+  return [
+    env.DB.prepare(`INSERT INTO trash (kind, ref, created_at) SELECT 'gemini', audio_file_name, ? FROM lectures WHERE ${where} AND audio_file_name IS NOT NULL`).bind(now, param),
+    env.DB.prepare(`INSERT INTO trash (kind, ref, created_at) SELECT 'kv', a.kv_key, ? FROM attachments a JOIN lectures l ON l.id = a.lecture_id WHERE l.${where}`).bind(now, param),
+    env.DB.prepare(`INSERT INTO trash (kind, ref, created_at) SELECT 'gemini', a.gemini_file_name, ? FROM attachments a JOIN lectures l ON l.id = a.lecture_id WHERE l.${where} AND a.gemini_file_name IS NOT NULL`).bind(now, param),
+    env.DB.prepare(`DELETE FROM segments WHERE lecture_id IN (SELECT id FROM lectures WHERE ${where})`).bind(param),
+    env.DB.prepare(`DELETE FROM attachments WHERE lecture_id IN (SELECT id FROM lectures WHERE ${where})`).bind(param),
+    env.DB.prepare(`DELETE FROM lectures WHERE ${where}`).bind(param),
+  ];
 }
 
-export async function remove({ env, ai, params }) {
+export async function remove({ env, params, now }) {
   await loadRow(env, params.id);
-  await deleteLecture(env, ai, params.id);
+  await env.DB.batch(deleteStatements(env, 'id = ?', params.id, now));
   return json({ ok: true });
 }
 

@@ -47,7 +47,8 @@ async function attach({ env, ai, now, lecture }) {
        ORDER BY position`,
     ).bind(lecture.id, now, REUPLOAD_MARGIN_MS).all()).results;
   for (const att of (await pending()).slice(0, ATTACH_BATCH)) {
-    const body = await env.FILES.get(att.kv_key, 'arrayBuffer');
+    // 20MB の PDF が 5 つでもメモリ（128MB）に乗せないよう、KV から流したまま送る
+    const body = await env.FILES.get(att.kv_key, 'stream');
     if (body === null) {
       if (att.gemini_file_name) await quietly(ai.deleteFile({ fileName: att.gemini_file_name }));
       await env.DB.prepare('DELETE FROM attachments WHERE id = ?').bind(att.id).run();

@@ -1,6 +1,7 @@
 import { it, expect } from 'vitest';
 import { fakeFetch, g } from './helpers.js';
 import { AiError } from '../src/ai/errors.js';
+import { createGemini, CHUNK_TIMEOUT_MS } from '../src/ai/gemini.js';
 
 it('startAudioUpload sends resumable start headers and returns upload url + granularity', async () => {
   const f = fakeFetch(() => new Response('{}', { headers: { 'x-goog-upload-url': 'https://up.test/s1', 'x-goog-upload-chunk-granularity': '8388608' } }));
@@ -92,4 +93,15 @@ it('uploadFile does start then upload+finalize and returns state', async () => {
   expect(f.calls[1].url).toBe('https://up.test/s2');
   expect(f.calls[1].headers.get('x-goog-upload-command')).toBe('upload, finalize');
   expect(f.calls[1].headers.get('x-goog-upload-offset')).toBe('0');
+});
+
+it('chunk uploads get a long timeout while other calls keep the short one', async () => {
+  const slow = (ms) => async (url, init = {}) => new Promise((resolve, reject) => {
+    const t = setTimeout(() => resolve(new Response('', { headers: { 'x-goog-upload-status': 'active' } })), ms);
+    init.signal?.addEventListener('abort', () => { clearTimeout(t); reject(init.signal.reason); });
+  });
+  const gem = createGemini({ apiKey: 'KEY', model: 'm', baseUrl: 'https://gem.test', fetch: slow(150), timeouts: { file: 100 } });
+  await expect(gem.getFileState({ fileName: 'files/a' })).rejects.toMatchObject({ kind: 'temporary' });
+  await expect(gem.uploadAudioChunk({ uploadUrl: 'https://up.test/s', offset: 0, body: new Uint8Array(1), size: 1, isLast: false })).resolves.toBeNull();
+  expect(CHUNK_TIMEOUT_MS).toBe(900000);
 });

@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { formatTime, parseTime, parseTranscript, nearestLineIndex, todayLocal } from '../public/lib/time.js';
-import { statusLabel, isWorking } from '../public/lib/status.js';
+import { statusLabel, isWorking, reuploadWarning } from '../public/lib/status.js';
 import { planChunks, normalizeDuration, uploadChunks } from '../public/lib/chunks.js';
 
 it('formatTime matches the server rule', () => {
@@ -58,7 +58,7 @@ it('planChunks and normalizeDuration', () => {
 
 it('uploadChunks retries a failing chunk and resyncs on offset_mismatch', async () => {
   const seen = []; let failOnce = true; const progress = [];
-  await uploadChunks({ size: 10, chunkSize: 4, onProgress: (n) => progress.push(n), sendChunk: async (o, e) => {
+  await uploadChunks({ size: 10, chunkSize: 4, sleep: async () => {}, onProgress: (n) => progress.push(n), sendChunk: async (o, e) => {
     seen.push(o);
     if (o === 4 && failOnce) { failOnce = false; throw new Error('net'); }
     if (o === 8 && seen.filter((x) => x === 8).length === 1) throw Object.assign(new Error('m'), { code: 'offset_mismatch', expected_offset: 6 });
@@ -70,7 +70,7 @@ it('uploadChunks retries a failing chunk and resyncs on offset_mismatch', async 
 
 it('uploadChunks gives up after 3 retries', async () => {
   let n = 0;
-  await expect(uploadChunks({ size: 4, chunkSize: 4, sendChunk: async () => { n++; throw new Error('down'); } })).rejects.toThrow('down');
+  await expect(uploadChunks({ size: 4, chunkSize: 4, sleep: async () => {}, sendChunk: async () => { n++; throw new Error('down'); } })).rejects.toThrow('down');
   expect(n).toBe(4);
 });
 
@@ -82,4 +82,28 @@ it('uploadChunks reads expected_offset from ApiError.data too', async () => {
     return { next_offset: e, done: e === 8 };
   } });
   expect(seen).toEqual([[0, 8], [4, 8]]);
+});
+
+it('uploadChunks waits 2, 4, 8 seconds before retries but not on offset_mismatch', async () => {
+  const waits = []; let n = 0;
+  await expect(uploadChunks({ size: 4, chunkSize: 4, sleep: async (ms) => { waits.push(ms); }, sendChunk: async () => { n++; throw new Error('down'); } })).rejects.toThrow('down');
+  expect(waits).toEqual([2000, 4000, 8000]);
+  const waits2 = []; let first = true;
+  await uploadChunks({ size: 8, chunkSize: 8, sleep: async (ms) => { waits2.push(ms); }, sendChunk: async (o, e) => {
+    if (first) { first = false; throw Object.assign(new Error('m'), { code: 'offset_mismatch', expected_offset: 4 }); }
+    return { next_offset: e, done: true };
+  } });
+  expect(waits2).toEqual([]);
+});
+
+it('uploadChunks fails if the server never says done', async () => {
+  await expect(uploadChunks({ size: 8, chunkSize: 8, sleep: async () => {}, sendChunk: async () => { throw Object.assign(new Error('m'), { code: 'offset_mismatch', expected_offset: 8 }); } })).rejects.toThrow();
+  await expect(uploadChunks({ size: 8, chunkSize: 8, sleep: async () => {}, sendChunk: async (o, e) => ({ next_offset: e, done: false }) })).rejects.toThrow();
+});
+
+it('reuploadWarning warns only when a transcript would be thrown away', () => {
+  expect(reuploadWarning({ status: 'error', step: 'summarize', segments_done: 3 })).toContain('文字起こし');
+  expect(reuploadWarning({ status: 'done', segments_done: 3 })).toContain('文字起こし');
+  expect(reuploadWarning({ status: 'error', step: 'transcribe', segments_done: 0, needs_audio: true })).toBeNull();
+  expect(reuploadWarning({ status: 'uploading', segments_done: 0, needs_audio: true })).toBeNull();
 });

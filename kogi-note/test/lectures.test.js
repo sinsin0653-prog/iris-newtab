@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, it, expect } from 'vitest';
+import { beforeEach, it, expect, vi } from 'vitest';
 import { resetDb, call, newSubject, newLecture, T0 } from './helpers.js';
 import { needsAudio } from '../src/api/lectures.js';
+import { sweepTrash } from '../src/jobs/trash.js';
 
 beforeEach(() => resetDb(env));
 const row = (id) => env.DB.prepare('SELECT * FROM lectures WHERE id = ?').bind(id).first();
@@ -90,11 +91,32 @@ it('delete removes rows, KV values and Gemini files (ignoring Gemini errors)', a
   await env.DB.prepare("INSERT INTO attachments (id, lecture_id, kind, mime, size, kv_key, position, gemini_file_name, created_at) VALUES ('x', ?, 'note_image', 'image/jpeg', 1, ?, 0, 'files/b', 1)").bind(id, `att/${id}/x`).run();
   await seg(id, 0, 't');
   expect((await call(`/api/lectures/${id}`, { method: 'DELETE', ai })).body).toEqual({ ok: true });
+  expect(deleted).toEqual([]);
+  expect(await sweepTrash(env, { ai, limit: 20 })).toBe(3);
   expect(deleted.sort()).toEqual(['files/a', 'files/b']);
+  expect((await env.DB.prepare('SELECT count(*) n FROM trash').first()).n).toBe(0);
   expect(await env.FILES.get(`att/${id}/x`)).toBeNull();
   for (const t of ['lectures WHERE id', 'segments WHERE lecture_id', 'attachments WHERE lecture_id'])
     expect((await env.DB.prepare(`SELECT count(*) n FROM ${t} = ?`).bind(id).first()).n).toBe(0);
   expect((await call(`/api/lectures/${id}`)).status).toBe(404);
+});
+
+it('deleting a subject with many lectures uses a fixed number of calls and leaves cleanup to the sweep', async () => {
+  const s = await newSubject();
+  for (let n = 1; n <= 15; n++) {
+    const id = await newLecture({ subject_id: s, number: n });
+    for (let i = 0; i < 5; i++) await env.FILES.put(`att/${id}/${i}`, 'v');
+    await env.DB.batch([0, 1, 2, 3, 4].map((i) => env.DB.prepare("INSERT INTO attachments (id, lecture_id, kind, mime, size, kv_key, position, created_at) VALUES (?, ?, 'note_image', 'image/jpeg', 1, ?, ?, 1)").bind(`${id}-${i}`, id, `att/${id}/${i}`, i)));
+  }
+  const deleteFile = vi.fn(async () => {});
+  expect((await call(`/api/subjects/${s}`, { method: 'DELETE', ai: { deleteFile } })).status).toBe(200);
+  expect(deleteFile).not.toHaveBeenCalled();
+  expect((await env.DB.prepare('SELECT count(*) n FROM lectures').first()).n).toBe(0);
+  expect((await env.DB.prepare('SELECT count(*) n FROM attachments').first()).n).toBe(0);
+  let swept = 0;
+  for (let i = 0; i < 10; i++) swept += await sweepTrash(env, { ai: { deleteFile }, limit: 20 });
+  expect(swept).toBe(75);
+  expect((await env.FILES.list({ prefix: 'att/' })).keys).toEqual([]);
 });
 
 it('deleting a subject deletes its lectures', async () => {

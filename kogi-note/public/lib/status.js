@@ -23,3 +23,9 @@ export function statusLabel(lecture) {
 }
 
 export const isWorking = (lecture) => lecture.status === 'processing';
+
+// 音声を入れ直すと、できている文字起こしは消える。そのときだけ確かめる
+export function reuploadWarning(lecture) {
+  if (!(lecture.segments_done > 0)) return null;
+  return '音声を入れ直すと、いまの文字起こしは消えて最初から作り直します。よろしいですか？';
+}

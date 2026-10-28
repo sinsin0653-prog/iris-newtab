@@ -11,7 +11,7 @@ const attRows = async (id) => (await env.DB.prepare('SELECT * FROM attachments W
 it('uploads 7 attachments over two runs, then summarizes and cleans up', async () => {
   const uploaded = []; const deleted = [];
   const ai = {
-    uploadFile: async (a) => { uploaded.push(a); return fileFor(a); },
+    uploadFile: async (a) => { uploaded.push(a); if (uploaded.length === 1) expect([...new Uint8Array(await new Response(a.body).arrayBuffer())]).toEqual([1, 2, 3]); return fileFor(a); },
     getFileState: async () => 'ACTIVE',
     summarize: vi.fn(async () => summary),
     deleteFile: async ({ fileName }) => { deleted.push(fileName); },
@@ -21,7 +21,7 @@ it('uploads 7 attachments over two runs, then summarizes and cleans up', async (
   for (let i = 0; i < 7; i++) await addAttachment(id, { position: i, kind: i === 6 ? 'handout_pdf' : 'note_image', mime: i === 6 ? 'application/pdf' : 'image/jpeg' });
   await runOnce(env, { ai, now: T0 });
   expect(uploaded).toHaveLength(5);
-  expect([...new Uint8Array(uploaded[0].body)]).toEqual([1, 2, 3]);
+  expect(uploaded[0].body).toBeInstanceOf(ReadableStream);
   expect(uploaded[0]).toMatchObject({ mime: 'image/jpeg', size: 3 });
   expect((await row(id)).step).toBe('attach');
   await runOnce(env, { ai, now: T0 });

@@ -10,7 +10,9 @@ export function normalizeDuration(d) {
   return typeof d === 'number' && Number.isFinite(d) && d > 0 ? Math.round(d) : null;
 }
 
-export async function uploadChunks({ size, chunkSize, sendChunk, onProgress, retries = 3 }) {
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+export async function uploadChunks({ size, chunkSize, sendChunk, onProgress, retries = 3, sleep = wait }) {
   let offset = 0;
   let failures = 0;
   while (offset < size) {
@@ -31,6 +33,9 @@ export async function uploadChunks({ size, chunkSize, sendChunk, onProgress, ret
       }
       failures += 1;
       if (failures > retries) throw err;
+      // 電波の切りかわりなどが落ち着くまで待つ（2・4・8 秒）
+      await sleep(2000 * 2 ** (failures - 1));
     }
   }
+  throw new Error('音声の送信が最後まで終わりませんでした');
 }

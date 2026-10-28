@@ -50,3 +50,12 @@ it('mutations need X-Kogi', () => {
   expect(() => checkMutation(makeRequest('/api/subjects', { method: 'POST', json: {} }))).not.toThrow();
   expect(() => checkMutation(makeRequest('/api/subjects', { headers: { 'X-Kogi': '' } }))).not.toThrow();
 });
+
+it('missing secrets fail closed', async () => {
+  for (const broken of [{ ...env, APP_PASSWORD: undefined }, { ...env, APP_PASSWORD: '' }, { ...env, SESSION_SECRET: '' }]) {
+    const res = await login(makeRequest('/api/login', { method: 'POST', json: { password: 'undefined' } }), broken, T0);
+    expect(res.status).toBe(500);
+    expect((await res.json()).error.code).toBe('not_configured');
+    expect(await isLoggedIn(makeRequest('/', { cookie: 'kogi_session=1.' + '0'.repeat(64) }), broken, T0)).toBe(false);
+  }
+});
