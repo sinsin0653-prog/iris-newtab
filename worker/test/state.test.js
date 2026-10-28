@@ -30,3 +30,45 @@ test('capture merges per subject and upgrades old string entries; client snooze 
   assert.equal(n.snoozeUntil, '2026-10-09T00:10:00Z');
   assert.equal(n.snoozeCount['2026-10-09'], 2);
 });
+
+// ---- 毎週くりかえす宿題 ----
+import { materializeRepeats } from '../src/state.js';
+import { materializeRepeats as appMaterialize } from '../../shukudai/sync.js';
+
+const wk = (over = {}) => ({ id: 'hw_a', subject: '統計学', range: '課題', where: 'manaba', due: '2026-10-26', repeat: 'weekly', done: false, packed: false, createdAt: '2026-10-19T00:00:00Z', updatedAt: '2026-10-19T00:00:00Z', ...over });
+const NOW = '2026-10-28T09:00:00Z';
+
+test('毎週：終わったら（できた）来週の分が出る。決まった id なので何回呼んでも 1 つだけ', () => {
+  const items = [wk({ due: '2026-11-02', done: true })];
+  const a = materializeRepeats(items, '2026-10-28', NOW);
+  assert.equal(a.length, 2);
+  const next = a.find((i) => i.id !== 'hw_a');
+  assert.equal(next.due, '2026-11-09');
+  assert.equal(next.id, 'hw_a_2026-11-09');
+  assert.equal(next.seriesId, 'hw_a');
+  assert.equal(next.done, false);
+  assert.equal(next.repeat, 'weekly');
+  assert.equal(next.subject, '統計学');
+  assert.equal(materializeRepeats(a, '2026-10-28', NOW).length, 2, '2 回目は増えない');
+});
+
+test('毎週：まだ終わっていなくて期限前なら、来週の分は出ない', () => {
+  assert.equal(materializeRepeats([wk({ due: '2026-11-02' })], '2026-10-28', NOW).length, 1);
+});
+
+test('毎週：期限を過ぎたら、終わっていなくても今週以降の分が出る（過ぎた週は飛ばす）', () => {
+  const a = materializeRepeats([wk({ due: '2026-10-12' })], '2026-10-28', NOW);
+  assert.equal(a.length, 2);
+  assert.equal(a.find((i) => i.id !== 'hw_a').due, '2026-11-02', '飛ばして、いまから先のいちばん近い同じ曜日');
+});
+
+test('毎週：やめる（repeat を外す）と増えない。消したものも生き返らない', () => {
+  assert.equal(materializeRepeats([wk({ due: '2026-11-02', done: true, repeat: null })], '2026-10-28', NOW).length, 1);
+  const gone = { ...wk({ due: '2026-11-09' }), id: 'hw_a_2026-11-09', seriesId: 'hw_a', deleted: true };
+  assert.equal(materializeRepeats([wk({ due: '2026-11-02', done: true }), gone], '2026-10-28', NOW).length, 2);
+});
+
+test('毎週：アプリ（sync.js）とサーバーで同じ結果になる', () => {
+  const items = [wk({ due: '2026-11-02', done: true }), wk({ id: 'hw_b', due: '2026-10-12', subject: '倫理学' })];
+  assert.deepEqual(appMaterialize(items, '2026-10-28', NOW), materializeRepeats(items, '2026-10-28', NOW));
+});

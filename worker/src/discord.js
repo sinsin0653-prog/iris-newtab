@@ -1,6 +1,6 @@
 // Discord とのやりとり：署名の確認、REST、ボタンとスラッシュコマンドの応答。
 import { discordPayload, parseDate, addDays, toISO, nudgeStage, captureStatus, nextLesson, isActive, dayPlan, effectiveTimetable, effectiveSchoolDays, askableSubjects, submitPlace } from './core.js';
-import { withDefaults } from './state.js';
+import { withDefaults, materializeRepeats } from './state.js';
 import { localParts } from './scheduler.js';
 
 export const API = 'https://discord.com/api/v10';
@@ -130,6 +130,13 @@ export async function handleInteraction(interaction, ctx) {
   const live = state.items.filter((i) => !i.deleted);
   const touch = (i) => { i.updatedAt = (ctx.now || new Date()).toISOString(); return i; };
   state.nudge.lastInteractionAt = (ctx.now || new Date()).toISOString();
+  // 毎週くりかえす宿題：終わったら、来週の分をその場で作る
+  const spawn = () => { state.items = materializeRepeats(state.items, D, (ctx.now || new Date()).toISOString()); };
+  // 押したボタンだけ消す（ほかのボタンは残す）。空になった行は捨てる
+  const dropButtons = (match) => ((msg_ && msg_.components) || []).map((row) => ({ type: 1, components: (row.components || []).filter((b) => !match(b.custom_id || '')) })).filter((row) => row.components.length);
+  const msg_ = interaction.message;
+  // 登録したあとに付けるボタン：やった／毎週にする
+  const afterAdd = (item) => [{ type: 1, components: [{ type: 2, style: 3, label: 'もう やった', custom_id: 'done:' + item.id }, { type: 2, style: 2, label: '毎週にする', custom_id: 'repeat:' + item.id }] }];
   const emit = (ev) => { if (Array.isArray(ctx.events)) ctx.events.push(ev); };
   const newItem = (subject, range, where, due) => {
     const nowIso = (ctx.now || new Date()).toISOString();
@@ -155,7 +162,8 @@ export async function handleInteraction(interaction, ctx) {
       await ctx.save(state);
       const d = parseDate(due);
       return reply({
-        embeds: [{ title: '登録した', description: `・${item.subject}　${item.range}　｜　${item.where ? 'どこ：' + item.where : 'どこ：まだ書いてない'}　｜　${d.getMonth() + 1}/${d.getDate()} まで`, color: 0xff8fc5, footer: { text: item.where ? '宿題忘れゼロ' : '宿題忘れゼロ ・ どこにあるかは、あとでアプリで足せる' } }]
+        embeds: [{ title: '登録した', description: `・${item.subject}　${item.range}　｜　${item.where ? 'どこ：' + item.where : 'どこ：まだ書いてない'}　｜　${d.getMonth() + 1}/${d.getDate()} まで`, color: 0xff8fc5, footer: { text: item.where ? '宿題忘れゼロ' : '宿題忘れゼロ ・ どこにあるかは、あとでアプリで足せる' } }],
+        components: afterAdd(item)
       });
     }
     if (name === 'kyou') {
@@ -212,6 +220,7 @@ export async function handleInteraction(interaction, ctx) {
     if (action === 'submit' || action === 'drop') {
       const hit = live.filter((i) => ids.includes(i.id) && isActive(i));
       for (const i of hit) { if (action === 'submit') { i.submitted = true; i.submittedAt = (ctx.now || new Date()).toISOString(); } else { i.dropped = true; i.droppedAt = (ctx.now || new Date()).toISOString(); } touch(i); }
+      spawn();
       await ctx.save(state);
       if (action === 'submit') for (const i of hit) emit({ type: 'submitted', text: `出した：${i.subject} ${i.range || ''}（${stamp}）` });
       const left = ((msg.components && msg.components[0] && msg.components[0].components) || []).filter((b) => !ids.some((id) => (b.custom_id || '').endsWith(':' + id)));
@@ -237,10 +246,30 @@ export async function handleInteraction(interaction, ctx) {
       return update({ content: `${msg.content || ''}\n${tail}`.trim(), embeds: msg.embeds || [], components: left.stage === 'clear' || !rest.length ? [] : [{ type: 1, components: rest }] });
     }
     if (action === 'done') {
-      for (const i of live) if (ids.includes(i.id)) { i.done = true; touch(i); }
+      const hit = live.filter((i) => ids.includes(i.id));
+      for (const i of hit) { i.done = true; touch(i); }
+      spawn();
       await ctx.save(state);
-      const keep = ((msg.components && msg.components[0] && msg.components[0].components) || []).filter((b) => !/^done:/.test(b.custom_id || '') && !/^snooze:/.test(b.custom_id || ''));
-      return update({ content: `${msg.content || ''}\nやった！（${stamp}）。あとは入れるだけ。`.trim(), embeds: msg.embeds || [], components: keep.length ? [{ type: 1, components: keep }] : [] });
+      for (const i of hit) emit({ type: 'done', text: `やった：${i.subject} ${i.range || ''}（${stamp}）` });
+      const again = hit.filter((i) => i.repeat === 'weekly').length ? ' 来週の分も出しておいた。' : '';
+      const rest = dropButtons((c) => ids.some((id) => c === 'done:' + id));
+      return update({ content: `${msg.content || ''}\nやった！（${stamp}）。あとは入れるだけ。${again}`.trim(), embeds: msg.embeds || [], components: rest });
+    }
+    if (action === 'repeat') {
+      const item = live.find((i) => i.id === arg);
+      if (!item) return ephemeral('その宿題はもうない。');
+      const on = item.repeat !== 'weekly';
+      item.repeat = on ? 'weekly' : null;
+      touch(item);
+      await ctx.save(state);
+      const rest = dropButtons((c) => c === 'repeat:' + item.id);
+      rest.push({ type: 1, components: [{ type: 2, style: on ? 4 : 2, label: on ? '毎週をやめる' : '毎週にする', custom_id: 'repeat:' + item.id }] });
+      return update({ content: `${msg.content || ''}\n${on ? '毎週の宿題にした。終わったら、来週の分が出る。' : '毎週をやめた。'}（${stamp}）`.trim(), embeds: msg.embeds || [], components: rest.slice(0, 5) });
+    }
+    if (action === 'ping') {
+      state.nudge.buttonOkAt = (ctx.now || new Date()).toISOString();
+      await ctx.save(state);
+      return update({ content: `${msg.content || ''}\nボタンも動いた！（${stamp}）。これで Discord とつながった。`.trim(), embeds: msg.embeds || [], components: [] });
     }
     if (action === 'snooze') {
       const used = (state.nudge.snoozeCount && state.nudge.snoozeCount[D]) || 0;
@@ -269,7 +298,7 @@ export async function handleInteraction(interaction, ctx) {
       const cst = askable();
       return reply({
         content: `登録した：${subject}　${range || '（範囲はあとで。夜に聞く）'}　｜　${item.where ? 'どこ：' + item.where : 'どこ：まだ書いてない'}　｜　${d.getMonth() + 1}/${d.getDate()} まで。` + (cst.all ? ' これで全部。' : ` ほかは？ のこり：${cst.unanswered.join('・')}`),
-        components: cst.all ? [] : captureRows(cst.unanswered)
+        components: afterAdd(item).concat(cst.all ? [] : captureRows(cst.unanswered)).slice(0, 5)
       });
     }
     if (cid.startsWith('fixmodal:')) {

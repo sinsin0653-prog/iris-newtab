@@ -50,12 +50,38 @@ test('pack button marks the items packed and edits the message', async () => {
   assert.match(part.data.content, /入れた（07:42）。あと 2 つ。/);
 });
 
-test('done button keeps the pack button', async () => {
+test('やった：押した宿題のボタンだけ消えて、ほかは残る', async () => {
   const c = ctx(stateWith());
-  const res = await handleInteraction({ type: 3, data: { custom_id: 'done:a' }, message: { content: 'x', components: [{ type: 1, components: [{ custom_id: 'pack:c,a', label: 'かばんに入れた' }, { custom_id: 'done:a', label: 'やった' }, { custom_id: 'snooze:a', label: '10分あとで' }] }] } }, c);
+  const msg = { content: 'x', components: [{ type: 1, components: [{ custom_id: 'pack:c,a', label: 'かばんに入れた' }] }, { type: 1, components: [{ custom_id: 'done:a', label: 'やった：英語' }, { custom_id: 'done:c', label: 'やった：社会' }] }, { type: 1, components: [{ custom_id: 'snooze:a', label: '10分あとで' }] }] };
+  const res = await handleInteraction({ type: 3, data: { custom_id: 'done:a' }, message: msg }, c);
   assert.equal(res.type, 7);
   assert.equal(c.saved[0].items.find((i) => i.id === 'a').done, true);
-  assert.deepEqual(res.data.components[0].components.map((b) => b.custom_id), ['pack:c,a']);
+  assert.deepEqual(res.data.components.map((r) => r.components.map((b) => b.custom_id)), [['pack:c,a'], ['done:c'], ['snooze:a']]);
+});
+
+test('毎週の宿題：やったら来週の分が出る。「毎週にする」で切り替わる。', async () => {
+  const c = ctx(stateWith());
+  const on = await handleInteraction({ type: 3, data: { custom_id: 'repeat:a' }, message: { content: 'x', components: [] } }, c);
+  assert.equal(c.saved[0].items.find((i) => i.id === 'a').repeat, 'weekly');
+  assert.match(on.data.content, /毎週の宿題にした/);
+  assert.equal(on.data.components[0].components[0].label, '毎週をやめる');
+  const c2 = ctx(c.saved[0]);
+  const done = await handleInteraction({ type: 3, data: { custom_id: 'done:a' }, message: { content: 'x', components: [] } }, c2);
+  const items = c2.saved[0].items;
+  const next = items.find((i) => i.seriesId === 'a');
+  assert.ok(next, '来週の分が増えた');
+  assert.equal(next.repeat, 'weekly');
+  assert.equal(next.done, false);
+  assert.match(done.data.content, /来週の分も出しておいた/);
+  const off = await handleInteraction({ type: 3, data: { custom_id: 'repeat:a' }, message: { content: 'x', components: [] } }, ctx(c2.saved[0]));
+  assert.match(off.data.content, /毎週をやめた/);
+});
+
+test('ボタンの確認（ping）：押されたら時刻を残す', async () => {
+  const c = ctx(stateWith());
+  const res = await handleInteraction({ type: 3, data: { custom_id: 'ping' }, message: { content: 'テスト', components: [] } }, c);
+  assert.match(res.data.content, /ボタンも動いた/);
+  assert.ok(c.saved[0].nudge.buttonOkAt);
 });
 
 test('snooze is limited to snoozeMax per day', async () => {
@@ -90,7 +116,9 @@ test('/kyou lists what to bring today', async () => {
   assert.equal(res.type, 4);
   assert.match(res.data.embeds[0].title, /出るまで あと8分/);
   // 社会（期限切れ）・英語（まだ）・数学（できてるけど入れてない）の 3 つ
-  assert.deepEqual(res.data.components[0].components.map((b) => b.label), ['入れた：社会', '入れた：英語', '入れた：数学', 'やった']);
+  assert.deepEqual(res.data.components[0].components.map((b) => b.label), ['入れた：社会', '入れた：英語', '入れた：数学']);
+  // 「やった」は宿題ごと。もうできている数学は出ない
+  assert.deepEqual(res.data.components[1].components.map((b) => b.label), ['やった：社会', 'やった：英語']);
 });
 
 test('command definitions are well-formed', () => {

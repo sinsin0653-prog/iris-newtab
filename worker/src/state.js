@@ -66,6 +66,35 @@ export function mergeItems(a = [], b = []) {
   return [...byId.values()].sort((x, y) => String(x.createdAt || '').localeCompare(String(y.createdAt || '')));
 }
 
+/**
+ * 毎週くりかえす宿題（repeat: 'weekly'）。終わった（できた・出した・先生に言った）か期限を過ぎたら、
+ * 来週の分を作る。id は「元の id_期限」で決まるので、何度呼んでも、端末とサーバーで別々に呼んでも 1 つだけ。
+ * やめるときは、いちばん新しい分の repeat を外す。過ぎてしまった週は飛ばして、いまから先のいちばん近い同じ曜日にする。
+ */
+export function materializeRepeats(items = [], today, nowIso) {
+  const addDays7 = (iso, n) => { const d = new Date(iso + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+  const byId = new Map(items.filter((i) => i && typeof i.id === 'string').map((i) => [i.id, i]));
+  const added = [];
+  for (const it of items) {
+    if (!it || it.deleted || it.repeat !== 'weekly' || !/^\d{4}-\d{2}-\d{2}$/.test(it.due || '')) continue;
+    let cur = it;
+    for (let n = 0; n < 8; n++) {
+      const finished = !!(cur.done || cur.submitted || cur.dropped);
+      if (!finished && !(cur.due < today)) break;
+      let due = addDays7(cur.due, 7);
+      while (due < today) due = addDays7(due, 7);
+      const root = cur.seriesId || cur.id;
+      const id = root + '_' + due;
+      const have = byId.get(id);
+      if (have) { if (have.deleted || have.repeat !== 'weekly') break; cur = have; continue; }
+      const next = { id, seriesId: root, subject: cur.subject, range: cur.range, rangeMissing: !cur.range, where: cur.where || '', location: cur.location || null, submitTo: cur.submitTo || '', due, repeat: 'weekly', done: false, packed: false, createdAt: nowIso, createdOn: today, updatedAt: nowIso };
+      byId.set(id, next); added.push(next);
+      cur = next;
+    }
+  }
+  return added.length ? items.concat(added) : items;
+}
+
 /** 端末から来た state を保存済みの state に合わせる。設定は新しい方、nudge はサーバーのものを守る。 */
 export function mergeState(server, incoming) {
   const s = withDefaults(server), c = withDefaults(incoming);

@@ -1,5 +1,5 @@
 // 宿題忘れゼロ — アプリ本体。部品とロジックは window.Shukudai（ds/bundle.js）。
-import { pullState, pushState, testDm, mergeItems, mergeCapture } from './sync.js';
+import { pullState, pushState, testDm, mergeItems, mergeCapture, materializeRepeats } from './sync.js';
 
 const KEY = 'shukudai.state.v1';
 const FONT_CSS = 'https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap';
@@ -58,6 +58,7 @@ async function doPull() {
     if (remote && Array.isArray(remote.items)) {
       state.items = mergeItems(state.items, remote.items);
       state.capture = mergeCapture(state.capture, remote.capture);
+      spawnRepeats();
       // サーバーの準備ページ（/setup）で入れた Discord ユーザー ID を、アプリの設定にも映す
       const rid = remote.settings && remote.settings.discord && remote.settings.discord.userId;
       if (rid && !state.settings.discord.userId) state.settings.discord = { ...state.settings.discord, userId: rid };
@@ -73,6 +74,8 @@ function setStatus(msg) { ui.syncStatus = msg; const el = document.querySelector
 // ---------- 小道具 ----------
 const nowIso = () => new Date().toISOString();
 const todayISO = () => S.formatDate ? isoOf(new Date()) : '';
+// 毎週くりかえす宿題：終わった・期限を過ぎたら、来週の分を作る（何回呼んでも 1 つだけ）
+function spawnRepeats() { state.items = materializeRepeats(state.items, isoOf(new Date()), nowIso()); }
 function isoOf(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; }
 function clock(d = new Date()) { return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; }
 function h(tag, attrs, ...children) {
@@ -241,7 +244,7 @@ function render() {
 // ---------- 操作 ----------
 const DONE_LINES = ['できた。', '1 つ消えた。', 'はい、つぎ。', 'いい調子。'];
 function completeItem(item, next, { fromCard = false, heroEl = null } = {}) {
-  item.done = next; touch(item); save();
+  item.done = next; touch(item); spawnRepeats(); save();
   if (!next) { render(); return; }
   ui.doneToday++;
   // 手応えを残す：主役なら打ち消し線に変えてから、カードなら 220ms の膨らみを見せてから、次へ
@@ -250,11 +253,11 @@ function completeItem(item, next, { fromCard = false, heroEl = null } = {}) {
   setTimeout(render, fromCard || heroEl ? 600 : 0);
 }
 function submitItem(item) {
-  item.submitted = true; item.submittedAt = nowIso(); touch(item); save();
+  item.submitted = true; item.submittedAt = nowIso(); touch(item); spawnRepeats(); save();
   toast('出した。えらい。', null); render();
 }
 function dropItem(item) {
-  item.dropped = true; item.droppedAt = nowIso(); touch(item); save();
+  item.dropped = true; item.droppedAt = nowIso(); touch(item); spawnRepeats(); save();
   toast('先生に言った。これで終わり。', null); render();
 }
 function toast(text, action) {
@@ -285,6 +288,8 @@ function showUndo(item) {
 function hideToast() { clearTimeout(ui.undo); ui.toast = null; const t = root.querySelector('.toast'); if (t) t.remove(); }
 function addItem(item) {
   if (!item.submitTo) item.submitTo = S.submitPlace(item.subject, item.due, state.settings);
+  if (ui.addRepeat) item.repeat = 'weekly';
+  ui.addRepeat = false;
   state.items.push(item); setCapture(item.subject, 'added'); state.draft = null; save(); closeSheet(); render();
 }
 
@@ -292,7 +297,8 @@ function addItem(item) {
 function openSheet(kind, item) {
   ui.deleteArmed = false;
   let content;
-  if (kind === 'add') content = S.QuickAdd({ today: todayISO(), initial: item || null, ...subjectChoices(), timetable: S.effectiveTimetable(state.settings), schoolDays: S.effectiveSchoolDays(state.settings), paperSpot: state.settings.paperSpot, allowEmptyRange: !!(item && item.fromCapture), onSubmit: addItem, onCancel: (draft) => { state.draft = (draft && (draft.range || draft.subject)) ? draft : null; save({ push: false }); closeSheet(); } });
+  ui.addRepeat = false;
+  if (kind === 'add') content = h('div', { className: 'add-wrap' }, S.QuickAdd({ today: todayISO(), initial: item || null, ...subjectChoices(), timetable: S.effectiveTimetable(state.settings), schoolDays: S.effectiveSchoolDays(state.settings), paperSpot: state.settings.paperSpot, allowEmptyRange: !!(item && item.fromCapture), onSubmit: addItem, onCancel: (draft) => { state.draft = (draft && (draft.range || draft.subject)) ? draft : null; save({ push: false }); closeSheet(); } }), repeatToggle(() => ui.addRepeat, (v) => { ui.addRepeat = v; }));
   else if (kind === 'week') content = weekSheet();
   else if (kind === 'import') content = importSheet(item);
   else if (kind === 'bring') content = bringSheet();
@@ -362,6 +368,14 @@ function renderBoard() {
     weekGrid(true)
   );
 }
+/** 「毎週くりかえす」のスイッチ。毎週出る課題は、1 回登録すれば、終わるたびに来週の分が出る。 */
+function repeatToggle(get, set) {
+  const b = h('button', { className: 'sk-choice', type: 'button', role: 'switch' });
+  const paint = () => { const on = !!get(); b.classList.toggle('is-on', on); b.setAttribute('aria-checked', on ? 'true' : 'false'); b.textContent = on ? '毎週くりかえす（終わると来週の分が出る）' : '毎週くりかえす？'; };
+  b.addEventListener('click', () => { set(!get()); paint(); });
+  paint();
+  return h('div', { className: 'repeat-toggle' }, b);
+}
 function editSheet(item) {
   const draft = { ...item };
   const input = (name, placeholder, type = 'text') => h('input', { className: 'sk-input', type, name, value: draft[name] || '', placeholder, autocomplete: 'off', onInput: (e) => { draft[name] = e.target.value; } });
@@ -376,13 +390,14 @@ function editSheet(item) {
     if (!ui.deleteArmed) { ui.deleteArmed = true; del.querySelector('.sk-btn__label').textContent = 'ほんとに消す？ もう一回押す'; return; }
     item.deleted = true; touch(item); save(); closeSheet();
   } });
-  return h('form', { className: 'panel', onSubmit: (e) => { e.preventDefault(); const autoBefore = S.submitPlace(item.subject, item.due, state.settings); const subject = draft.subject || 'その他'; const due = draft.due || item.due; let submitTo = (draft.submitTo || '').trim(); if (!submitTo || submitTo === autoBefore) submitTo = S.submitPlace(subject, due, state.settings); const range = (draft.range || '').trim() || item.range; Object.assign(item, { subject, range, rangeMissing: !range, where: (draft.where || '').trim(), submitTo, due }); touch(item); save(); closeSheet(); } },
+  return h('form', { className: 'panel', onSubmit: (e) => { e.preventDefault(); const autoBefore = S.submitPlace(item.subject, item.due, state.settings); const subject = draft.subject || 'その他'; const due = draft.due || item.due; let submitTo = (draft.submitTo || '').trim(); if (!submitTo || submitTo === autoBefore) submitTo = S.submitPlace(subject, due, state.settings); const range = (draft.range || '').trim() || item.range; Object.assign(item, { subject, range, rangeMissing: !range, where: (draft.where || '').trim(), submitTo, due, repeat: draft.repeat === 'weekly' ? 'weekly' : null }); touch(item); spawnRepeats(); save(); closeSheet(); } },
     h('div', { className: 'panel__head' }, h('h2', { className: 'panel__title', text: '直す' }), h('button', { className: 'sk-iconbtn', type: 'button', 'aria-label': 'とじる', onClick: closeSheet }, S.icon('close', 24))),
     h('div', { className: 'sk-field' }, h('p', { className: 'sk-field__label', text: '01 科目' }), subjectChoices),
     h('div', { className: 'sk-field' }, h('label', { className: 'sk-field__label', text: '02 範囲' }), input('range', 'p.24〜27')),
     h('div', { className: 'sk-field' }, h('label', { className: 'sk-field__label', text: '03 どこにある？' }), input('where', '教科書、プリント、Classroom…')),
     h('div', { className: 'sk-field' }, h('label', { className: 'sk-field__label', text: '04 いつまで？' }), input('due', '', 'date')),
     h('div', { className: 'sk-field' }, h('label', { className: 'sk-field__label', text: '05 出すところ（任意）' }), input('submitTo', '先生に直接、提出箱…')),
+    h('div', { className: 'sk-field' }, h('p', { className: 'sk-field__label', text: '06 くりかえし' }), repeatToggle(() => draft.repeat === 'weekly', (v) => { draft.repeat = v ? 'weekly' : null; })),
     h('div', { className: 'panel__actions' },
       S.BigButton({ label: 'これで保存', kind: 'primary', icon: 'check', full: true, type: 'submit' }),
       item.packed ? S.BigButton({ label: 'かばんから出した（入れたを取り消す）', kind: 'secondary', full: true, onClick: () => { item.packed = false; touch(item); save(); closeSheet(); } }) : null,
@@ -585,6 +600,7 @@ function boot() {
   S = window.Shukudai;
   if (!S) { setTimeout(boot, 30); return; }
   loadFonts();
+  spawnRepeats(); save({ push: false });
   render();
   ui.board = /[?&]board=1/.test(location.search);
   if (ui.board) { renderBoard(); setInterval(renderBoard, 60000); }

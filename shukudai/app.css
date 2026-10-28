@@ -113,3 +113,6 @@ body.is-board .brand__name { font-size: 40px; line-height: 48px; }
 .courses__leave { color: var(--ink-soft); font-weight: 700; }
 
 [hidden] { display: none !important; }
+
+.repeat-toggle { padding: 4px 16px 16px; }
+.repeat-toggle .sk-choice { width: 100%; justify-content: center; }

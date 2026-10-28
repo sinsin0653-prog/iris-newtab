@@ -886,8 +886,9 @@
       } else {
         row1.push({ type: 2, style: 3, label: 'かばんに入れた', custom_id: 'pack:' + items.map(function (i) { return i.id; }).join(',') });
       }
-      if (kind !== 'overdue') row1.push({ type: 2, style: 2, label: 'やった', custom_id: 'done:' + items[0].id });
       compRows.push({ type: 1, components: row1.slice(0, 5) });
+      var undone = kind === 'overdue' ? [] : items.filter(function (i) { return !i.done; }).slice(0, 5);
+      if (undone.length) compRows.push({ type: 1, components: undone.map(function (i) { return { type: 2, style: 2, label: 'やった：' + i.subject, custom_id: 'done:' + i.id }; }) });
       var row2 = [];
       if (stageKey === 'calm' || stageKey === 'soon' || stageKey === 'evening') row2.push({ type: 2, style: 2, label: '10分あとで', custom_id: 'snooze:' + items[0].id });
       if (props.appUrl) row2.push({ type: 2, style: 5, label: 'アプリで見る', url: props.appUrl });

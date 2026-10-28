@@ -1,6 +1,6 @@
 // はしごを上る係。5 分おきに呼ばれ、「いま送るべき催促」を決める。送るのは index.js。
 import { discordPayload, nudgeStage, dueInfo, parseDate, addDays, hhmmToMinutes, captureStatus, hasSubjects, isActive, isPackedToday, dayPlan, daySubjects, effectiveTimetable } from './core.js';
-import { withDefaults } from './state.js';
+import { withDefaults, materializeRepeats } from './state.js';
 
 /** UTC の Date を、設定のタイムゾーンの「壁時計」に直す。local は getHours() などがその壁時計を返す Date。 */
 export function localParts(now, tz = 'Asia/Tokyo') {
@@ -41,6 +41,7 @@ export function planNudges({ state, now = new Date() }) {
   const nowIso = now.toISOString();
   const lp = localParts(now, s.tz);
   const D = lp.dateKey, M = lp.minutes;
+  st.items = materializeRepeats(st.items, D, nowIso); // 毎週の宿題：期限を過ぎたら来週の分を出す
   const sent = { ...st.nudge.sent };
   const actions = [];
   const mark = (slot) => { sent[slot] = nowIso; };

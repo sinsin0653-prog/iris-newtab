@@ -46,6 +46,7 @@ test('setup page, health, setup API and a cron run work from the single file', a
   const realFetch = globalThis.fetch;
   globalThis.fetch = async (url, init) => {
     calls.push(`${init.method} ${String(url).replace('https://discord.com/api/v10', '')}`);
+    if (String(url).endsWith('/applications/@me')) return new Response(JSON.stringify({ interactions_endpoint_url: null }), { status: 200 });
     if (String(url).endsWith('/commands')) return new Response(JSON.stringify(JSON.parse(init.body).map((c) => ({ name: c.name }))), { status: 200 });
     if (String(url).endsWith('/users/@me/channels')) return new Response(JSON.stringify({ id: 'dm1' }), { status: 200 });
     if (String(url).endsWith('/channels/dm1/messages')) return new Response(JSON.stringify({ id: 'm1' }), { status: 200 });
@@ -53,8 +54,9 @@ test('setup page, health, setup API and a cron run work from the single file', a
   };
   try {
     const res = await (await worker.fetch(new Request('https://w.example/api/setup', { method: 'POST', headers: { Authorization: 'Bearer secret-token', 'Content-Type': 'application/json' }, body: JSON.stringify({ userId: '123456789012345678' }) }), env, ctx)).json();
-    assert.deepEqual(res, { saved: true, registered: ['/shukudai', '/kyou'], dm: true, errors: [] });
-    assert.deepEqual(calls, ['PUT /applications/111/commands', 'POST /users/@me/channels', 'POST /channels/dm1/messages']);
+    assert.deepEqual(res, { saved: true, registered: ['/shukudai', '/kyou'], dm: true, endpoint: { set: null, want: 'https://w.example/interactions', ok: false }, errors: [res.errors[0]] });
+    assert.match(res.errors[0], /Interactions Endpoint URL がまだ空.*https:\/\/w\.example\/interactions/);
+    assert.deepEqual(calls, ['PUT /applications/111/commands', 'GET /applications/@me', 'POST /users/@me/channels', 'POST /channels/dm1/messages']);
     const bad = await (await worker.fetch(new Request('https://w.example/api/setup', { method: 'POST', headers: { Authorization: 'Bearer secret-token' }, body: JSON.stringify({ userId: 'abc', register: false, test: false }) }), env, ctx)).json();
     assert.match(bad.errors[0], /数字だけ/);
     // DM が届かない（50007）を言葉にする

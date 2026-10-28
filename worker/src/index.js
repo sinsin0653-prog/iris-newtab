@@ -3,7 +3,7 @@ import { planNudges } from './scheduler.js';
 import { verifyDiscordRequest, handleInteraction, DiscordRest, COMMANDS } from './discord.js';
 import { SETUP_HTML } from './setup-page.js';
 import { APP_ASSETS } from './app-assets.js';
-import { withDefaults, mergeState, emptyState } from './state.js';
+import { withDefaults, mergeState, emptyState, materializeRepeats } from './state.js';
 import { nudgeStage, dayPlan } from './core.js';
 import { localParts } from './scheduler.js';
 
@@ -70,6 +70,7 @@ export default {
         try { incoming = await request.json(); } catch { return json(env, { error: 'bad json' }, 400); }
         const before = await loadState(env);
         const merged = mergeState(before, incoming);
+        merged.items = materializeRepeats(merged.items, localParts(new Date(), merged.settings.tz).dateKey, new Date().toISOString());
         await saveState(env, merged);
         // アプリ側で全部「かばんに入れた」になったら、良い知らせを見守りチャンネルへ
         const lp = localParts(new Date(), merged.settings.tz);
@@ -100,11 +101,11 @@ export default {
     }
     if (url.pathname === '/api/health' && request.method === 'GET') {
       // 何が入っているか（あるか・ないかだけ。中身は返さない）
-      let kv = false, lastRunAt = null, lastRunVia = null, userIdSaved = false;
+      let kv = false, lastRunAt = null, lastRunVia = null, buttonOkAt = null, userIdSaved = false;
       try {
-        if (env.SHUKUDAI) { const st = await loadState(env); kv = true; lastRunAt = st.nudge.lastRunAt || null; lastRunVia = st.nudge.lastRunVia || null; userIdSaved = !!st.settings.discord.userId; }
+        if (env.SHUKUDAI) { const st = await loadState(env); kv = true; lastRunAt = st.nudge.lastRunAt || null; lastRunVia = st.nudge.lastRunVia || null; buttonOkAt = st.nudge.buttonOkAt || null; userIdSaved = !!st.settings.discord.userId; }
       } catch { kv = false; }
-      return json(env, { ok: true, checks: { DISCORD_TOKEN: !!env.DISCORD_TOKEN, DISCORD_PUBLIC_KEY: !!env.DISCORD_PUBLIC_KEY, DISCORD_APP_ID: !!env.DISCORD_APP_ID, SYNC_TOKEN: !!env.SYNC_TOKEN, KV: kv }, userIdSaved, lastRunAt, lastRunVia, interactionsUrl: url.origin + '/interactions' });
+      return json(env, { ok: true, checks: { DISCORD_TOKEN: !!env.DISCORD_TOKEN, DISCORD_PUBLIC_KEY: !!env.DISCORD_PUBLIC_KEY, DISCORD_APP_ID: !!env.DISCORD_APP_ID, SYNC_TOKEN: !!env.SYNC_TOKEN, KV: kv }, userIdSaved, lastRunAt, lastRunVia, buttonOkAt, interactionsUrl: url.origin + '/interactions' });
     }
     if (url.pathname === '/api/setup' && request.method === 'POST') {
       if (!env.SYNC_TOKEN) return json(env, { error: 'SYNC_TOKEN（合言葉）がまだ Worker に入っていない' }, 400);
@@ -112,7 +113,7 @@ export default {
       if (!env.SHUKUDAI) return json(env, { error: 'KV（SHUKUDAI）がまだつながっていない' }, 400);
       let body = {};
       try { body = await request.json(); } catch { body = {}; }
-      const out = { saved: false, registered: null, dm: false, errors: [] };
+      const out = { saved: false, registered: null, dm: false, endpoint: null, errors: [] };
       const state = await loadState(env);
       const userId = String(body.userId || '').trim();
       if (userId) {
@@ -128,11 +129,18 @@ export default {
           catch (e) { out.errors.push('コマンド登録：' + explainDiscord(e)); }
         }
       }
+      // ボタンの返事を Discord がこの Worker に送る設定（Interactions Endpoint URL）が入っているか、Discord 本人に聞く
+      if (body.register !== false) try {
+        const app = await rest.call('GET', '/applications/@me');
+        const want = url.origin + '/interactions';
+        out.endpoint = { set: app.interactions_endpoint_url || null, want, ok: app.interactions_endpoint_url === want };
+        if (!out.endpoint.ok) out.errors.push(app.interactions_endpoint_url ? `Interactions Endpoint URL がちがう（いまは ${app.interactions_endpoint_url}）。${want} にする` : `Interactions Endpoint URL がまだ空。Developer Portal の General Information に ${want} を貼って Save Changes（これがないと、DM のボタンを押しても何も起きない）`);
+      } catch (e) { out.errors.push('Discord に聞けなかった：' + explainDiscord(e)); }
       if (body.test !== false) {
         const uid = state.settings.discord.userId;
         if (!uid) out.errors.push('ユーザー ID がまだない（上の欄に入れる）');
         else {
-          try { await rest.dm(uid, { content: 'つながった！ここに催促が来る。', embeds: [{ title: '宿題忘れゼロ', description: 'テスト送信。放課後の「課題出た？」も、朝の「出るまであと〇分」も、ここに来る。', color: 0xff8fc5 }] }); out.dm = true; }
+          try { await rest.dm(uid, { content: 'つながった！ここに催促が来る。', embeds: [{ title: '宿題忘れゼロ', description: 'テスト送信。放課後の「課題出た？」も、朝の「出るまであと〇分」も、ここに来る。下のボタンを押して、動くか確かめて。', color: 0xff8fc5 }], components: [{ type: 1, components: [{ type: 2, style: 3, label: '押して確かめる', custom_id: 'ping' }] }] }); out.dm = true; }
           catch (e) { out.errors.push('テスト DM：' + explainDiscord(e)); }
         }
       }

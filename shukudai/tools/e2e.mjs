@@ -158,7 +158,7 @@ try {
   await page.reload({ waitUntil: 'load' });
   await page.waitForSelector('.sk-capture');
   check((await page.textContent('.sk-capture__eyebrow')).includes('3 回目'), '放課後から 60 分で 3 回目の聞き方になる');
-  check((await page.textContent('.sk-capture__title')).includes('Classroom と連絡帳'), '3 回目は文言が変わる');
+  check((await page.textContent('.sk-capture__title')).includes('授業のページやメモ'), '3 回目は文言が変わる');
   const subj = await page.$$eval('.sk-capture__rows .sk-capture__row .sk-capture__name', (b) => b.map((x) => x.textContent));
   check((await page.textContent('.sk-capture__handin')).includes('出した？'), '持っていったぶんの「出した？」が出る');
   check(subj.join(',') === '数学,英語,理科', '時間割の科目だけを、科目ごとに聞く');

@@ -79,6 +79,7 @@ export const SETUP_HTML = String.raw`<!doctype html>
     var ul = $('checks'); ul.textContent = '';
     labels.forEach(function (l) { ul.appendChild(row(!!h.checks[l[0]], l[1])); });
     ul.appendChild(row(!!h.userIdSaved, '自分の Discord ユーザー ID（下の 3 で入る）'));
+    ul.appendChild(row(!!h.buttonOkAt, h.buttonOkAt ? 'Discord のボタンが動いた（' + new Date(h.buttonOkAt).toLocaleString('ja-JP') + '）' : 'Discord のボタン（テスト DM の「押して確かめる」を押すと OK になる）'));
     $('iurl').textContent = h.interactionsUrl;
     $('cron').textContent = h.lastRunAt ? '最後に見回った：' + new Date(h.lastRunAt).toLocaleString('ja-JP') + (h.lastRunVia === 'tick' ? '（GitHub の見回り係）' : h.lastRunVia === 'cron' ? '（Cloudflare の Cron）' : '') : 'まだ一度も見回っていない。';
   }).catch(function () { $('checks').textContent = '確認できなかった。Worker のコードが貼れているか見て。'; });
@@ -96,7 +97,8 @@ export const SETUP_HTML = String.raw`<!doctype html>
         if (o.error) { res.appendChild(row(false, o.error)); return; }
         if (o.saved) res.appendChild(row(true, 'ユーザー ID を覚えた'));
         if (o.registered) res.appendChild(row(true, 'コマンドを登録した：' + o.registered.join(' ')));
-        if (o.dm) res.appendChild(row(true, 'テスト DM を送った。Discord を見て！'));
+        if (o.endpoint) res.appendChild(row(o.endpoint.ok, o.endpoint.ok ? 'Discord が、ボタンの返事をこの Worker に送る設定になっている' : 'ボタンの返事の送り先が、まだこの Worker になっていない（下に直し方）'));
+        if (o.dm) res.appendChild(row(true, 'テスト DM を送った。Discord を見て、「押して確かめる」を押して！'));
         (o.errors || []).forEach(function (e) { res.appendChild(row(false, e)); });
       })
       .catch(function () { res.textContent = ''; res.appendChild(row(false, '送れなかった。ネットか URL を見て。')); });
