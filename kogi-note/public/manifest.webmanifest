@@ -1,0 +1,9 @@
+{
+  "name": "講義ノート",
+  "short_name": "講義ノート",
+  "start_url": "/#/",
+  "display": "standalone",
+  "background_color": "#fbf6ef",
+  "theme_color": "#fbf6ef",
+  "icons": [{ "src": "icon.svg", "type": "image/svg+xml", "sizes": "any" }]
+}
