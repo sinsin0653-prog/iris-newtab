@@ -67,3 +67,19 @@ export async function newLecture(fields = {}) {
   await env.DB.prepare(`INSERT INTO lectures (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`).bind(...cols.map((c) => row[c])).run();
   return row.id;
 }
+
+// ---- Task 5: fetch のニセモノと、それを使う Gemini クライアント
+import { createGemini } from '../src/ai/gemini.js';
+
+export function fakeFetch(handler) {
+  const calls = [];
+  const f = async (url, init = {}) => {
+    const req = new Request(url, init);
+    calls.push(req);
+    return handler(req, calls.length);
+  };
+  f.calls = calls;
+  return f;
+}
+
+export const g = (fetch) => createGemini({ apiKey: 'KEY', model: 'm', baseUrl: 'https://gem.test', fetch });
