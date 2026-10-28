@@ -89,3 +89,18 @@ export const processingLecture = (fields = {}) =>
   newLecture({ status: 'processing', step: 'wait_file', audio_mime: 'audio/mp4', audio_file_name: 'files/a', audio_file_uri: 'u/a', audio_expires_at: T0 + 172800000, ...fields });
 
 export const row = (id) => env.DB.prepare('SELECT * FROM lectures WHERE id = ?').bind(id).first();
+
+// ---- Task 9
+export const addSegment = (lectureId, idx, text) =>
+  env.DB.prepare('INSERT INTO segments (lecture_id, idx, text) VALUES (?, ?, ?)').bind(lectureId, idx, text).run();
+
+export async function addAttachment(lectureId, { position = 0, kind = 'note_image', mime = 'image/jpeg', gemini = {} } = {}) {
+  const id = crypto.randomUUID();
+  const kv_key = `att/${lectureId}/${id}`;
+  await env.FILES.put(kv_key, new Uint8Array([1, 2, 3]));
+  await env.DB.prepare(
+    `INSERT INTO attachments (id, lecture_id, kind, mime, size, kv_key, position, gemini_file_name, gemini_file_uri, gemini_expires_at, created_at)
+     VALUES (?, ?, ?, ?, 3, ?, ?, ?, ?, ?, ?)`,
+  ).bind(id, lectureId, kind, mime, kv_key, position, gemini.name ?? null, gemini.uri ?? null, gemini.expiresAt ?? null, T0).run();
+  return { id, kv_key };
+}
