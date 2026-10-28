@@ -1,6 +1,7 @@
 // 科目の API
 import { HttpError, json, readJson } from '../http.js';
 import { all, first, run } from '../db.js';
+import { deleteLecture } from './lectures.js';
 
 function cleanName(value) {
   const name = typeof value === 'string' ? value.trim() : '';
@@ -38,9 +39,10 @@ export async function rename({ request, env, params }) {
   return json({ id: params.id, name });
 }
 
-// 授業の削除は Task 4 で deleteLecture に置きかえる
-export async function remove({ env, params }) {
+export async function remove({ env, ai, params }) {
   await mustExist(env, params.id);
+  const ids = await all(env.DB, 'SELECT id FROM lectures WHERE subject_id = ?', params.id);
+  for (const { id } of ids) await deleteLecture(env, ai, id);
   await run(env.DB, 'DELETE FROM subjects WHERE id = ?', params.id);
   return json({ ok: true });
 }

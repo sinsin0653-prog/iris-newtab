@@ -2,6 +2,7 @@
 import { HttpError, errorResponse, json } from './http.js';
 import { login, logout, isLoggedIn, checkMutation } from './auth.js';
 import * as subjects from './api/subjects.js';
+import * as lectures from './api/lectures.js';
 
 // [メソッド, パス, 処理]。後のタスクはここに足す
 const ROUTES = [
@@ -10,6 +11,12 @@ const ROUTES = [
   ['PATCH', '/api/subjects/:id', subjects.rename],
   ['DELETE', '/api/subjects/:id', subjects.remove],
   ['GET', '/api/subjects/:id/lectures', subjects.lectures],
+  ['POST', '/api/lectures', lectures.create],
+  ['GET', '/api/lectures/:id', lectures.get],
+  ['PATCH', '/api/lectures/:id', lectures.patch],
+  ['DELETE', '/api/lectures/:id', lectures.remove],
+  ['POST', '/api/lectures/:id/retry', lectures.retry],
+  ['POST', '/api/lectures/:id/resummarize', lectures.resummarize],
 ];
 
 const compiled = ROUTES.map(([method, path, handler]) => ({
