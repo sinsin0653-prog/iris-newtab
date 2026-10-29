@@ -95,9 +95,21 @@ export async function render(root, [lectureId]) {
     return h('button', { type: 'button', class: 'time', onclick: () => { pendingJump = sec; tab = 'transcript'; renderTabs(); renderPanel(); } }, `[${formatTime(sec)}]`);
   };
 
+  function renderNotesSections() {
+    const sections = lecture.notes?.sections ?? [];
+    if (!sections.length) return null;
+    return h('section', { class: 'lecture-notes' },
+      h('h2', {}, '📝 授業ノート'),
+      sections.map((sec) => h('article', { class: 'card' },
+        h('h3', {}, timeLink(sec.time), sec.heading),
+        h('p', { class: 'body' }, sec.body),
+        sec.terms.length ? h('dl', {}, sec.terms.flatMap((t) => [h('dt', {}, t.term), h('dd', {}, t.meaning)])) : null,
+        sec.quotes.length ? h('ul', { class: 'quotes' }, sec.quotes.map((q) => h('li', {}, h('q', {}, q)))) : null)));
+  }
+
   function renderSummary() {
     const s = lecture.summary;
-    if (!s) return h('p', { class: 'meta' }, isWorking(lecture) ? 'いま作っています。終わったらここに出ます。' : 'まだ要約がありません');
+    if (!s) return h('div', {}, h('p', { class: 'meta' }, isWorking(lecture) ? 'いま作っています。終わったらここに出ます。' : 'まだ要約がありません'), renderNotesSections());
     return h('div', { class: 'summary' },
       h('h2', {}, '📌 今日のテーマ'), h('p', {}, s.theme),
       h('h2', {}, '🗺 授業の流れ'), s.flow.length ? h('ol', {}, s.flow.map((f) => h('li', {}, h('strong', {}, f.heading), f.handout_pages ? h('span', { class: 'tag' }, f.handout_pages) : null, h('br'), f.detail))) : h('p', { class: 'meta' }, 'なし'),
@@ -105,6 +117,7 @@ export async function render(root, [lectureId]) {
         k.not_in_notes ? h('span', { class: 'tag note' }, '📝メモになし') : null,
         k.kind === 'exam' ? h('span', { class: 'tag exam' }, 'テストに出る') : null))) : h('p', { class: 'meta' }, 'なし'),
       h('h2', {}, '📢 連絡事項'), s.announcements.length ? h('ul', {}, s.announcements.map((a) => h('li', {}, timeLink(a.time), a.text))) : h('p', { class: 'meta' }, 'なし'),
+      renderNotesSections(),
     );
   }
 

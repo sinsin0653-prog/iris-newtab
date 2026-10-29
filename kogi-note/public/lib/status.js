@@ -10,7 +10,12 @@ export function statusLabel(lecture) {
       return 'エラー';
     case 'processing':
       if (lecture.waiting_reason === 'rate_limited') return '混んでいるので待っています';
-      if (lecture.step === 'wait_file') return '準備中';
+      if (lecture.step === 'wait_file' || lecture.step === 'attach') return '準備中';
+      if (lecture.step === 'notes') {
+        const total = lecture.segments_total;
+        if (!total) return '授業ノートを書いています';
+        return `授業ノートを書いています（${Math.min((lecture.notes_done ?? 0) + 1, total)}/${total}）`;
+      }
       if (lecture.step === 'transcribe') {
         const total = lecture.segments_total;
         if (!total) return '文字起こし中';

@@ -28,13 +28,14 @@ it('validates number, date, note_text, subject and duplicates', async () => {
 });
 
 it('joins segments in order, skips empty ones and parses the summary', async () => {
-  const id = await newLecture({ summary_json: JSON.stringify({ theme: 'T', flow: [], key_points: [], announcements: [] }) });
+  const id = await newLecture({ summary_json: JSON.stringify({ theme: 'T', flow: [], key_points: [], announcements: [] }), notes_json: JSON.stringify({ sections: [{ heading: 'h', time: '00:00', body: 'b', terms: [], quotes: [] }], done: 1 }) });
   await seg(id, 1, '[30:00] 後半');
   await seg(id, 0, '[00:00] 前半');
   await seg(id, 2, '');
   const { lecture } = (await call(`/api/lectures/${id}`)).body;
   expect(lecture.transcript).toBe('[00:00] 前半\n[30:00] 後半');
   expect(lecture.summary.theme).toBe('T');
+  expect(lecture.notes.sections[0].heading).toBe('h');
   expect(lecture.segments_done).toBe(3);
 });
 
@@ -52,6 +53,8 @@ it('needsAudio', () => {
   expect(needsAudio({ status: 'error', step: 'transcribe', audio_expires_at: T0 + 599_999 }, T0)).toBe(true);
   expect(needsAudio({ status: 'error', step: 'transcribe', audio_expires_at: T0 + 600_000 }, T0)).toBe(false);
   expect(needsAudio({ status: 'error', step: 'summarize', audio_expires_at: null }, T0)).toBe(false);
+  expect(needsAudio({ status: 'error', step: 'attach', audio_file_name: 'files/a', audio_expires_at: null }, T0)).toBe(true);
+  expect(needsAudio({ status: 'error', step: 'attach', audio_file_name: null, audio_expires_at: null }, T0)).toBe(false);
   expect(needsAudio({ status: 'done' }, T0)).toBe(false);
 });
 
@@ -76,7 +79,11 @@ it('resummarize: done → processing/attach; processing → 409 busy; untranscri
   const errAtSummary = await newLecture({ number: 2, status: 'error', step: 'summarize', segments_total: 1 });
   await seg(errAtSummary, 0, 't');
   expect((await call(`/api/lectures/${errAtSummary}/resummarize`, { method: 'POST' })).status).toBe(200);
-  const half = await newLecture({ number: 3, status: 'error', step: 'attach', segments_total: 2 });
+  const errAtNotes = await newLecture({ number: 5, status: 'error', step: 'notes', segments_total: 1 });
+  await seg(errAtNotes, 0, 't');
+  expect((await call(`/api/lectures/${errAtNotes}/resummarize`, { method: 'POST' })).status).toBe(200);
+  expect((await row(errAtNotes)).step).toBe('attach');
+  const half = await newLecture({ number: 3, status: 'error', step: 'notes', segments_total: 2 });
   await seg(half, 0, 't');
   expect((await call(`/api/lectures/${half}/resummarize`, { method: 'POST' })).body.error.code).toBe('not_transcribed');
   const errAtTranscribe = await newLecture({ number: 4, status: 'error', step: 'transcribe', segments_total: 1 });

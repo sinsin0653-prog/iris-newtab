@@ -41,7 +41,8 @@ it('statusLabel', () => {
   expect(statusLabel({ status: 'processing', step: 'transcribe', segments_done: 1, segments_total: 3 })).toBe('文字起こし中（2/3）');
   expect(statusLabel({ status: 'processing', step: 'transcribe', segments_done: 3, segments_total: 3 })).toBe('文字起こし中（3/3）');
   expect(statusLabel({ status: 'processing', step: 'transcribe', waiting_reason: 'rate_limited' })).toBe('混んでいるので待っています');
-  expect(statusLabel({ status: 'processing', step: 'attach' })).toBe('要約を作っています');
+  expect(statusLabel({ status: 'processing', step: 'attach' })).toBe('準備中');
+  expect(statusLabel({ status: 'processing', step: 'notes', segments_done: 3, segments_total: 3, notes_done: 1 })).toBe('授業ノートを書いています（2/3）');
   expect(statusLabel({ status: 'processing', step: 'summarize' })).toBe('要約を作っています');
   expect(statusLabel({ status: 'done' })).toBe('完成');
   expect(statusLabel({ status: 'error' })).toBe('エラー');

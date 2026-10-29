@@ -29,7 +29,10 @@ async function waitForServer() {
   throw new Error('wrangler dev が起動しませんでした');
 }
 
+let mockRequests = [];
+
 async function flow(browser, viewport) {
+  mockRequests.length = 0;
   const tag = `${viewport.width}`;
   const page = await browser.newPage({ viewport });
   const pageErrors = [];
@@ -51,6 +54,10 @@ async function flow(browser, viewport) {
   await page.click(`a.card:has-text("${subject}")`);
   await page.waitForSelector(`h1:has-text("${subject}")`);
   const subjectUrl = page.url();
+  await page.click('summary:has-text("用語リスト")');
+  await page.fill('#glossary', 'テスト用語');
+  await page.click('#save-glossary');
+  await page.waitForSelector('text=保存しました');
   await page.click('text=＋授業を追加');
   await page.waitForSelector('#audio');
   await page.setInputFiles('#audio', { name: 'lecture.wav', mimeType: 'audio/wav', buffer: wavBytes(2) });
@@ -75,7 +82,7 @@ async function flow(browser, viewport) {
   assert(status === '完成', `完成になりませんでした（${status}）`);
   await page.click('[data-tab=summary]');
   const summary = await page.textContent('[role=tabpanel]');
-  for (const s of ['テストのテーマ', '導入', 'p.1', '📝メモになし', 'テストに出る', '来週は小テスト']) assert(summary.includes(s), `要約に「${s}」がありません`);
+  for (const s of ['テストのテーマ', '導入', 'p.1', '📝メモになし', 'テストに出る', '来週は小テスト', '授業ノート', 'テストの導入', 'なぜ大事か', '大事なところ']) assert(summary.includes(s), `要約に「${s}」がありません`);
   await shot('summary');
 
   await page.click('button.time:has-text("[00:10]")');
@@ -103,6 +110,12 @@ async function flow(browser, viewport) {
 
   const noScroll = await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
   assert(noScroll, '横にはみ出しています');
+  // 用語リストとレジュメが、文字起こしの依頼に入っている
+  const transcribeReq = mockRequests.find((r) => r.url.includes(':generateContent') && !r.body.generationConfig?.responseSchema);
+  assert(transcribeReq, '文字起こしの依頼がありません');
+  const parts = transcribeReq.body.contents[0].parts;
+  assert(parts.some((p) => p.text && p.text.includes('テスト用語')), '用語リストが渡っていません');
+  assert(parts.some((p) => p.file_data && p.file_data.mime_type === 'application/pdf'), 'レジュメが渡っていません');
   assert(pageErrors.length === 0, `画面のエラー：${pageErrors.join(' / ')}`);
   await page.close();
   console.log(`OK ${tag}px`);
@@ -112,6 +125,7 @@ async function main() {
   fs.rmSync(PERSIST, { recursive: true, force: true });
   fs.mkdirSync(SHOTS, { recursive: true });
   const mock = await startMockGemini();
+  mockRequests = mock.requests;
   execFileSync(wrangler, ['d1', 'migrations', 'apply', 'kogi_note', '--local', '--persist-to', PERSIST], { cwd: ROOT, env, stdio: 'ignore' });
   const vars = ['APP_PASSWORD:e2e-pass', 'SESSION_SECRET:e2e', 'GEMINI_API_KEY:x', 'GEMINI_MODEL:mock', `GEMINI_BASE_URL:${mock.url}`, 'SEGMENT_INTERVAL_MS:0'];
   const dev = spawn(wrangler, ['dev', '--port', String(PORT), '--persist-to', PERSIST, '--test-scheduled', ...vars.flatMap((v) => ['--var', v])], { cwd: ROOT, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });

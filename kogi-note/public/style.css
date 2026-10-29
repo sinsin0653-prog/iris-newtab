@@ -79,3 +79,11 @@ button:disabled { opacity: 0.5; cursor: default; }
 progress { width: 100%; height: 12px; }
 .center { text-align: center; }
 .login { max-width: 360px; margin: 40px auto; }
+
+.lecture-notes h3 { font-size: 1rem; margin: 0 0 6px; }
+.lecture-notes .body { white-space: pre-wrap; margin: 0 0 8px; }
+.lecture-notes dl { margin: 0 0 8px; }
+.lecture-notes dt { font-weight: 600; }
+.lecture-notes dd { margin: 0 0 4px 1em; color: var(--muted); }
+.lecture-notes .quotes { padding-left: 1.2em; color: var(--muted); }
+details.card summary { cursor: pointer; font-weight: 600; }

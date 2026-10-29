@@ -13,7 +13,7 @@ it('migration creates all tables', async () => {
 });
 
 it('lectures has the counters defaulting to 0', async () => {
-  await env.DB.prepare("INSERT INTO subjects VALUES ('s1','心理学',1)").run();
+  await env.DB.prepare("INSERT INTO subjects (id, name, created_at) VALUES ('s1','心理学',1)").run();
   await env.DB.prepare("INSERT INTO lectures (id,subject_id,number,date,status,created_at,updated_at) VALUES ('l1','s1',1,'2026-10-28','uploading',1,1)").run();
   const row = await env.DB.prepare("SELECT rate_limit_count, lease_count, attempts, next_run_at, lease_until FROM lectures WHERE id='l1'").first();
   expect(row).toEqual({ rate_limit_count: 0, lease_count: 0, attempts: 0, next_run_at: 0, lease_until: 0 });

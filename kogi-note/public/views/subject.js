@@ -9,10 +9,25 @@ export async function render(root, [subjectId]) {
   const title = h('h1', {}, '…');
   const listBox = h('div');
   const actions = h('div', { class: 'row' });
+  const glossary = h('textarea', { id: 'glossary', maxlength: 2000, placeholder: '例：帰無仮説、有意水準、p値、ベイズ推定\n（専門用語・人名・固有名詞。聞き間違いが減ります）' });
+  const glossaryMsg = h('span', { class: 'meta', 'aria-live': 'polite' });
+  const glossaryBox = h('details', { class: 'card' },
+    h('summary', {}, '📚 用語リスト（文字起こしのヒント）'),
+    h('p', { class: 'meta' }, 'この科目でよく出る言葉を書いておくと、Gemini が聞き取りに迷ったときにこの表記を使います。次に追加する授業から効きます。'),
+    glossary,
+    h('p', { class: 'row' }, h('button', { type: 'button', id: 'save-glossary', onclick: async () => {
+      try {
+        await apiFetch(`/api/subjects/${subjectId}`, { method: 'PATCH', json: { glossary: glossary.value } });
+        glossaryMsg.textContent = '保存しました';
+      } catch (err) {
+        glossaryMsg.textContent = errorText(err);
+      }
+    } }, '保存'), glossaryMsg));
 
   async function load() {
     const { subject, lectures } = await apiFetch(`/api/subjects/${subjectId}/lectures`);
     title.textContent = subject.name;
+    if (document.activeElement !== glossary) glossary.value = subject.glossary ?? '';
     listBox.replaceChildren(lectures.length
       ? h('ul', { class: 'list' }, lectures.map((l) => h('li', {}, h('a', { class: 'card', href: `#/l/${l.id}`, 'data-lecture': l.id },
         h('span', { class: 'grow' }, h('strong', {}, `第${l.number}回`), ' ', h('span', { class: 'meta' }, l.date)),
@@ -46,7 +61,7 @@ export async function render(root, [subjectId]) {
     } }, '科目を消す'),
   );
 
-  root.append(h('p', {}, h('a', { href: '#/' }, '← 科目の一覧')), title, actions, listBox);
+  root.append(h('p', {}, h('a', { href: '#/' }, '← 科目の一覧')), title, actions, glossaryBox, listBox);
   try {
     await load();
   } catch (err) {

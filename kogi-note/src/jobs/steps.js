@@ -9,15 +9,28 @@ async function waitFile({ ai, lecture, cfg }) {
   if (state === 'PROCESSING') return { set: {}, waitMs: 60000 };
   if (state !== 'ACTIVE') throw new AiError('permanent', 'Gemini が音声を読めませんでした');
   const total = Math.max(1, Math.ceil((lecture.audio_duration_sec ?? UNKNOWN_DURATION_SEC) / cfg.segmentSec));
-  return { set: { segments_total: total, step: 'transcribe' } };
+  // レジュメを先に Gemini に置いてから文字起こしする（用語の聞き間違いを減らす）
+  return { set: { segments_total: total, step: 'attach' } };
 }
+
+const glossaryOf = async (env, lecture) =>
+  (await env.DB.prepare('SELECT glossary FROM subjects WHERE id = ?').bind(lecture.subject_id).first())?.glossary ?? '';
+
+// Gemini に置いてあるレジュメ（写真・PDF）
+const handoutsOf = async (env, lecture) =>
+  (await env.DB.prepare(
+    "SELECT gemini_file_uri AS fileUri, mime FROM attachments WHERE lecture_id = ? AND kind != 'note_image' AND gemini_file_uri IS NOT NULL ORDER BY position",
+  ).bind(lecture.id).all()).results;
 
 async function transcribe({ env, ai, lecture, cfg }) {
   const { n: idx } = await env.DB.prepare('SELECT count(*) AS n FROM segments WHERE lecture_id = ?').bind(lecture.id).first();
   const startSec = idx * cfg.segmentSec;
   let endSec = startSec + cfg.segmentSec;
   if (lecture.audio_duration_sec) endSec = Math.min(endSec, lecture.audio_duration_sec);
-  const text = await ai.transcribeSegment({ fileUri: lecture.audio_file_uri, mime: lecture.audio_mime, startSec, endSec });
+  const text = await ai.transcribeSegment({
+    fileUri: lecture.audio_file_uri, mime: lecture.audio_mime, startSec, endSec,
+    glossary: await glossaryOf(env, lecture), handouts: await handoutsOf(env, lecture),
+  });
   await env.DB.prepare('INSERT OR REPLACE INTO segments (lecture_id, idx, text) VALUES (?, ?, ?)').bind(lecture.id, idx, text).run();
   if (idx + 1 < lecture.segments_total) return { set: {}, waitMs: cfg.segmentIntervalMs };
   try {
@@ -25,7 +38,28 @@ async function transcribe({ env, ai, lecture, cfg }) {
   } catch {
     // 消せなくても 48 時間で消える
   }
-  return { set: { audio_file_name: null, audio_file_uri: null, step: 'attach' } };
+  return { set: { audio_file_name: null, audio_file_uri: null, step: 'notes' } };
+}
+
+// 区間ごとの授業ノート。notes_json に { sections, done } を貯めていく
+async function notes({ env, ai, lecture, cfg }) {
+  const transcript = await transcriptOf(env, lecture.id);
+  if (transcript === '') throw new AiError('permanent', '音声から話し声が見つかりませんでした。音声を入れ直してください');
+  const saved = lecture.notes_json ? JSON.parse(lecture.notes_json) : { sections: [], done: 0 };
+  if (saved.done >= lecture.segments_total) return { set: { step: 'summarize' } };
+  const idx = saved.done;
+  const seg = await env.DB.prepare('SELECT text FROM segments WHERE lecture_id = ? AND idx = ?').bind(lecture.id, idx).first();
+  const segmentText = seg?.text ?? '';
+  const startSec = idx * cfg.segmentSec;
+  let endSec = startSec + cfg.segmentSec;
+  if (lecture.audio_duration_sec) endSec = Math.min(endSec, lecture.audio_duration_sec);
+  let sections = [];
+  if (segmentText !== '') {
+    ({ sections } = await ai.writeNotes({ segmentText, startSec, endSec, glossary: await glossaryOf(env, lecture), handouts: await handoutsOf(env, lecture) }));
+  }
+  const next = { sections: [...saved.sections, ...sections], done: idx + 1 };
+  const done = next.done >= lecture.segments_total;
+  return { set: { notes_json: JSON.stringify(next), ...(done ? { step: 'summarize' } : {}) } };
 }
 
 const ATTACH_BATCH = 5;
@@ -61,7 +95,8 @@ async function attach({ env, ai, now, lecture }) {
     if (saved.meta.changes === 0) await quietly(ai.deleteFile({ fileName: file.fileName }));
   }
   if ((await pending()).length > 0) return { set: {}, waitMs: 0 };
-  return { set: { step: 'summarize' } };
+  // 音声がまだあれば文字起こしへ。もう無ければ（作り直し）ノートへ
+  return { set: { step: lecture.audio_file_name ? 'transcribe' : 'notes' } };
 }
 
 async function summarize({ env, ai, lecture }) {
@@ -73,8 +108,10 @@ async function summarize({ env, ai, lecture }) {
   const states = await Promise.all(atts.map((a) => ai.getFileState({ fileName: a.gemini_file_name })));
   if (states.some((s) => s === 'FAILED')) throw new AiError('permanent', 'Gemini がメモかレジュメのファイルを読めませんでした');
   if (states.some((s) => s !== 'ACTIVE')) return { set: {}, waitMs: 60000 };
+  const notesValue = lecture.notes_json ? JSON.parse(lecture.notes_json) : { sections: [] };
   const summary = await ai.summarize({
     transcript,
+    notes: { sections: notesValue.sections ?? [] },
     noteText: lecture.note_text,
     attachments: atts.map((a) => ({ fileUri: a.gemini_file_uri, mime: a.mime, kind: a.kind })),
   });
@@ -85,6 +122,6 @@ async function summarize({ env, ai, lecture }) {
   return { set: { summary_json: JSON.stringify(summary), status: 'done', step: null } };
 }
 
-export const STEPS = { wait_file: waitFile, transcribe, attach, summarize };
+export const STEPS = { wait_file: waitFile, attach, transcribe, notes, summarize };
 
-export const STEP_NAMES = { wait_file: '準備', transcribe: '文字起こし', attach: 'ファイルの準備', summarize: '要約' };
+export const STEP_NAMES = { wait_file: '準備', attach: 'ファイルの準備', transcribe: '文字起こし', notes: '授業ノート', summarize: '要約' };

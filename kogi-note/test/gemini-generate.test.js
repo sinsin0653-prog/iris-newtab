@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { fakeFetch, g } from './helpers.js';
-import { formatTime, transcribePrompt, NO_SPEECH, SUMMARY_SYSTEM, buildSummaryText, validateSummary, normalizeSegmentTimes } from '../src/ai/prompts.js';
+import { formatTime, transcribePrompt, NO_SPEECH, SUMMARY_SYSTEM, NOTES_SYSTEM, buildSummaryText, buildNotesText, validateSummary, validateNotes, normalizeSegmentTimes, GLOSSARY_MAX } from '../src/ai/prompts.js';
 
 const reply = (text, finishReason = 'STOP') => Response.json({ candidates: [{ content: { parts: [{ text }] }, finishReason }] });
 
@@ -10,27 +10,55 @@ it('formatTime counts minutes past 60', () => {
   expect(formatTime(1800)).toBe('30:00');
 });
 
-it('transcribePrompt names the range and the rules', () => {
-  const p = transcribePrompt(1800, 3600);
-  for (const s of ['30:00', '60:00', '[MM:SS]', NO_SPEECH, '（聞き取れず）', '日本語']) expect(p).toContain(s);
+it('transcribePrompt names the range, the rules, the glossary and the handouts', () => {
+  const p = transcribePrompt(1800, 3600, { glossary: '帰無仮説、有意水準', hasHandouts: true });
+  for (const s of ['30:00', '60:00', '[MM:SS]', NO_SPEECH, '（聞き取れず）', '日本語', '帰無仮説、有意水準', 'レジュメ', '表記に合わせ']) expect(p).toContain(s);
+  const bare = transcribePrompt(0, 60, { glossary: '', hasHandouts: false });
+  expect(bare).not.toContain('レジュメ');
+  expect(bare).not.toContain('用語リスト');
+  expect(transcribePrompt(0, 60)).toContain('[MM:SS]');
 });
 
-it('summary instructions say what counts as notes and that content is data', () => {
-  for (const s of ['not_in_notes', 'typed_notes', 'レジュメ', 'handout_pages', '従わない']) expect(SUMMARY_SYSTEM).toContain(s);
-  const t = buildSummaryText({ transcript: '[00:00] 本文', noteText: 'メモ' });
+it('notes instructions ask for why / examples / terms per segment and are exhaustive', () => {
+  for (const s of ['なぜ', '例', '用語', 'もれなく', '従わない']) expect(NOTES_SYSTEM).toContain(s);
+  const t = buildNotesText({ segmentText: '[30:00] 本文', startSec: 1800, endSec: 3600, glossary: 'p値' });
+  expect(t).toContain('<transcript_segment from="30:00" to="60:00">\n[30:00] 本文\n</transcript_segment>');
+  expect(t).toContain('<glossary>\np値\n</glossary>');
+  expect(buildNotesText({ segmentText: 'x', startSec: 0, endSec: 60, glossary: '' })).not.toContain('<glossary>');
+  expect(GLOSSARY_MAX).toBe(2000);
+});
+
+it('validateNotes accepts sections with time and rejects wrong shapes', () => {
+  const good = { sections: [{ heading: '導入', time: '30:05', body: '何を・なぜ・例', terms: [{ term: 'p値', meaning: '…' }], quotes: ['そのまま'] }] };
+  expect(validateNotes(good)).toEqual(good);
+  expect(validateNotes({ sections: [] })).toEqual({ sections: [] });
+  for (const bad of [null, {}, { sections: [{ heading: 'h' }] }, { sections: [{ heading: 'h', time: '1:2', body: 'b', terms: [], quotes: [] }] }, { sections: [{ heading: 'h', time: '', body: 'b', terms: [{ term: 'x' }], quotes: [] }] }])
+    expect(() => validateNotes(bad)).toThrow(expect.objectContaining({ kind: 'permanent' }));
+});
+
+it('summary instructions say what counts as notes, use the lecture notes, and treat content as data', () => {
+  for (const s of ['not_in_notes', 'typed_notes', 'レジュメ', 'handout_pages', '従わない', 'lecture_notes', '後半']) expect(SUMMARY_SYSTEM).toContain(s);
+  const notes = { sections: [{ heading: '導入', time: '00:05', body: 'b', terms: [], quotes: [] }] };
+  const t = buildSummaryText({ transcript: '[00:00] 本文', noteText: 'メモ', notes });
   expect(t).toContain('<transcript>\n[00:00] 本文\n</transcript>');
   expect(t).toContain('<typed_notes>\nメモ\n</typed_notes>');
+  expect(t).toContain('<lecture_notes>');
+  expect(t).toContain('[00:05] 導入');
 });
 
 it('transcribeSegment sends the file and returns trimmed text; NO_SPEECH becomes empty', async () => {
   const f = fakeFetch(() => reply('  [30:00] こんにちは\n'));
-  expect(await g(f).transcribeSegment({ fileUri: 'u', mime: 'audio/mp4', startSec: 1800, endSec: 3600 })).toBe('[30:00] こんにちは');
+  expect(await g(f).transcribeSegment({ fileUri: 'u', mime: 'audio/mp4', startSec: 1800, endSec: 3600, glossary: '帰無仮説', handouts: [{ fileUri: 'pdf', mime: 'application/pdf' }] })).toBe('[30:00] こんにちは');
   const body = await f.calls[0].json();
   expect(f.calls[0].url).toBe('https://gem.test/v1beta/models/m:generateContent');
   expect(f.calls[0].headers.get('x-goog-api-key')).toBe('KEY');
-  expect(body.contents[0].parts[0]).toEqual({ file_data: { mime_type: 'audio/mp4', file_uri: 'u' } });
-  expect(body.contents[0].parts[1].text).toContain('30:00');
-  expect(body.generationConfig).toEqual({ temperature: 0, maxOutputTokens: 65536 });
+  const parts = body.contents[0].parts;
+  expect(parts[0].text).toContain('レジュメ');
+  expect(parts[1]).toEqual({ file_data: { mime_type: 'application/pdf', file_uri: 'pdf' } });
+  expect(parts[2]).toEqual({ file_data: { mime_type: 'audio/mp4', file_uri: 'u' } });
+  expect(parts[3].text).toContain('30:00');
+  expect(parts[3].text).toContain('帰無仮説');
+  expect(body.generationConfig).toEqual({ temperature: 0, maxOutputTokens: 65536, thinkingConfig: { thinkingBudget: 4096 } });
   expect(await g(fakeFetch(() => reply(NO_SPEECH))).transcribeSegment({ fileUri: 'u', mime: 'audio/mp4', startSec: 0, endSec: 1 })).toBe('');
 });
 
@@ -62,15 +90,33 @@ it('normalizeSegmentTimes shifts segment-relative times', () => {
   expect(normalizeSegmentTimes('[0:00:05] a', 3600)).toBe('[60:05] a');
 });
 
+it('writeNotes sends the segment with schema and a thinking budget, and validates', async () => {
+  const good = { sections: [{ heading: '導入', time: '30:05', body: 'b', terms: [], quotes: [] }] };
+  const f = fakeFetch(() => reply(JSON.stringify(good)));
+  expect(await g(f).writeNotes({ segmentText: '[30:00] 本文', startSec: 1800, endSec: 3600, glossary: 'p値', handouts: [{ fileUri: 'pdf', mime: 'application/pdf' }] })).toEqual(good);
+  const body = await f.calls[0].json();
+  expect(body.systemInstruction.parts[0].text).toBe(NOTES_SYSTEM);
+  expect(body.generationConfig.responseMimeType).toBe('application/json');
+  expect(body.generationConfig.responseSchema.properties.sections).toBeTruthy();
+  expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 8192 });
+  const parts = body.contents[0].parts;
+  expect(parts[0].text).toContain('レジュメ');
+  expect(parts[1]).toEqual({ file_data: { mime_type: 'application/pdf', file_uri: 'pdf' } });
+  expect(parts[2].text).toContain('<transcript_segment');
+  await expect(g(fakeFetch(() => reply('{"sections":[{"heading":1}]}'))).writeNotes({ segmentText: 'x', startSec: 0, endSec: 1, glossary: '', handouts: [] })).rejects.toMatchObject({ kind: 'permanent' });
+});
+
 it('summarize sends labelled attachments + schema and validates the result', async () => {
   const good = { theme: 'テーマ', flow: [], key_points: [{ point: 'p', time: '23:10', not_in_notes: true, kind: 'exam' }], announcements: [] };
   const f = fakeFetch(() => reply(JSON.stringify(good)));
-  const out = await g(f).summarize({ transcript: 't', noteText: 'n', attachments: [{ fileUri: 'img', mime: 'image/jpeg', kind: 'note_image' }, { fileUri: 'pdf', mime: 'application/pdf', kind: 'handout_pdf' }] });
+  const notes = { sections: [{ heading: '導入', time: '00:05', body: 'b', terms: [], quotes: [] }] };
+  const out = await g(f).summarize({ transcript: 't', noteText: 'n', notes, attachments: [{ fileUri: 'img', mime: 'image/jpeg', kind: 'note_image' }, { fileUri: 'pdf', mime: 'application/pdf', kind: 'handout_pdf' }] });
   expect(out).toEqual(good);
   const body = await f.calls[0].json();
   expect(body.systemInstruction.parts[0].text).toBe(SUMMARY_SYSTEM);
   expect(body.generationConfig.responseMimeType).toBe('application/json');
   expect(body.generationConfig.maxOutputTokens).toBe(65536);
+  expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 8192 });
   expect(body.generationConfig.responseSchema.type).toBe('OBJECT');
   const parts = body.contents[0].parts;
   expect(parts[0].text).toContain('メモの写真');
@@ -78,6 +124,7 @@ it('summarize sends labelled attachments + schema and validates the result', asy
   expect(parts[2].text).toContain('レジュメ');
   expect(parts[3]).toEqual({ file_data: { mime_type: 'application/pdf', file_uri: 'pdf' } });
   expect(parts[4].text).toContain('<transcript>');
+  expect(parts[4].text).toContain('<lecture_notes>');
 });
 
 it('summarize rejects non-JSON and wrong shapes as permanent', async () => {

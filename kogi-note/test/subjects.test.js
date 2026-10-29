@@ -43,6 +43,15 @@ it('lists subjects in creation order with lecture counts and last update', async
   ]);
 });
 
+it('glossary is stored per subject, trimmed, capped at 2000 chars', async () => {
+  const a = await call('/api/subjects', { method: 'POST', json: { name: '統計学' } });
+  expect((await call(`/api/subjects/${a.body.id}`, { method: 'PATCH', json: { glossary: ' 帰無仮説、p値 ' } })).body).toEqual({ id: a.body.id, name: '統計学', glossary: '帰無仮説、p値' });
+  expect((await call(`/api/subjects/${a.body.id}/lectures`)).body.subject).toEqual({ id: a.body.id, name: '統計学', glossary: '帰無仮説、p値' });
+  expect((await call(`/api/subjects/${a.body.id}`, { method: 'PATCH', json: { glossary: 'あ'.repeat(2001) } })).status).toBe(400);
+  expect((await call(`/api/subjects/${a.body.id}`, { method: 'PATCH', json: { glossary: 3 } })).status).toBe(400);
+  expect((await call(`/api/subjects/${a.body.id}`, { method: 'PATCH', json: {} })).status).toBe(400);
+});
+
 it('rejects empty and over-100-char names', async () => {
   expect((await call('/api/subjects', { method: 'POST', json: { name: ' ' } })).status).toBe(400);
   expect((await call('/api/subjects', { method: 'POST', json: { name: 'あ'.repeat(101) } })).status).toBe(400);
@@ -65,9 +74,9 @@ it('lecture list counts finished segments and sorts by number', async () => {
   const l1 = await newLecture({ subject_id: s, number: 1, status: 'processing', step: 'transcribe', segments_total: 3 });
   await env.DB.batch([0, 1].map((i) => env.DB.prepare('INSERT INTO segments VALUES (?,?,?)').bind(l1, i, 't')));
   const { body } = await call(`/api/subjects/${s}/lectures`);
-  expect(body.subject).toEqual({ id: s, name: '心理学' });
+  expect(body.subject).toEqual({ id: s, name: '心理学', glossary: '' });
   expect(body.lectures.map((l) => l.id)).toEqual([l1, l2]);
-  expect(body.lectures[0]).toEqual({ id: l1, number: 1, date: '2026-10-28', status: 'processing', step: 'transcribe', waiting_reason: null, segments_total: 3, segments_done: 2, error_message: null });
+  expect(body.lectures[0]).toEqual({ id: l1, number: 1, date: '2026-10-28', status: 'processing', step: 'transcribe', waiting_reason: null, segments_total: 3, segments_done: 2, notes_done: 0, error_message: null });
 });
 
 it('non-API paths go to static assets', async () => {

@@ -1,12 +1,16 @@
 // Gemini REST クライアント。キーは URL に入れず x-goog-api-key ヘッダーで送る
 import { AiError, aiErrorFromResponse } from './errors.js';
-import { NO_SPEECH, SUMMARY_SCHEMA, SUMMARY_SYSTEM, buildSummaryText, normalizeSegmentTimes, transcribePrompt, validateSummary } from './prompts.js';
+import { NO_SPEECH, NOTES_SCHEMA, NOTES_SYSTEM, SUMMARY_SCHEMA, SUMMARY_SYSTEM, buildNotesText, buildSummaryText, normalizeSegmentTimes, transcribePrompt, validateNotes, validateSummary } from './prompts.js';
 
 const FILE_TIMEOUT_MS = 120_000;
 const GENERATE_TIMEOUT_MS = 300_000;
 // かけらはブラウザの回線の速さで流れてくるので、ゆっくりなスマホの回線でも切らない
 export const CHUNK_TIMEOUT_MS = 900_000;
 const BLOCKED = new Set(['SAFETY', 'RECITATION', 'PROHIBITED_CONTENT', 'BLOCKLIST', 'SPII']);
+// 考える量：文字起こしは軽め、ノートと要約は多め
+const THINK_TRANSCRIBE = 4096;
+const THINK_WRITE = 8192;
+const HANDOUT_LABEL = '次のファイルは、この講義のレジュメです。';
 const LABELS = { note_image: '次のファイルは自分のメモの写真です。', handout_pdf: '次のファイルはレジュメです。', handout_image: '次のファイルはレジュメです。' };
 
 export function createGemini({ apiKey, model, baseUrl, fetch, timeouts = {} }) {
@@ -88,35 +92,52 @@ export function createGemini({ apiKey, model, baseUrl, fetch, timeouts = {} }) {
     return text;
   }
 
+  const handoutParts = (handouts) => handouts.flatMap((f) => [{ text: HANDOUT_LABEL }, { file_data: { mime_type: f.mime, file_uri: f.fileUri } }]);
+  const parseJson = (text, what) => {
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new AiError('permanent', `${what}の形がちがいます（JSON ではありません）`);
+    }
+  };
+
   return {
-    async transcribeSegment({ fileUri, mime, startSec, endSec }) {
+    async transcribeSegment({ fileUri, mime, startSec, endSec, glossary = '', handouts = [] }) {
+      const parts = handoutParts(handouts);
+      parts.push({ file_data: { mime_type: mime, file_uri: fileUri } });
+      parts.push({ text: transcribePrompt(startSec, endSec, { glossary, hasHandouts: handouts.length > 0 }) });
       const text = await generate({
-        contents: [{ role: 'user', parts: [{ file_data: { mime_type: mime, file_uri: fileUri } }, { text: transcribePrompt(startSec, endSec) }] }],
-        generationConfig: { temperature: 0, maxOutputTokens: 65536 },
+        contents: [{ role: 'user', parts }],
+        generationConfig: { temperature: 0, maxOutputTokens: 65536, thinkingConfig: { thinkingBudget: THINK_TRANSCRIBE } },
       });
       if (text === NO_SPEECH) return '';
       return normalizeSegmentTimes(text, startSec);
     },
 
-    async summarize({ transcript, noteText, attachments }) {
+    async writeNotes({ segmentText, startSec, endSec, glossary = '', handouts = [] }) {
+      const parts = handoutParts(handouts);
+      parts.push({ text: buildNotesText({ segmentText, startSec, endSec, glossary }) });
+      const text = await generate({
+        systemInstruction: { parts: [{ text: NOTES_SYSTEM }] },
+        contents: [{ role: 'user', parts }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: NOTES_SCHEMA, maxOutputTokens: 65536, thinkingConfig: { thinkingBudget: THINK_WRITE } },
+      });
+      return validateNotes(parseJson(text, '授業ノート'));
+    },
+
+    async summarize({ transcript, noteText, notes, attachments }) {
       const parts = [];
       for (const a of attachments) {
         parts.push({ text: LABELS[a.kind] ?? '次のファイルはレジュメです。' });
         parts.push({ file_data: { mime_type: a.mime, file_uri: a.fileUri } });
       }
-      parts.push({ text: buildSummaryText({ transcript, noteText }) });
+      parts.push({ text: buildSummaryText({ transcript, noteText, notes }) });
       const text = await generate({
         systemInstruction: { parts: [{ text: SUMMARY_SYSTEM }] },
         contents: [{ role: 'user', parts }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: SUMMARY_SCHEMA, maxOutputTokens: 65536 },
+        generationConfig: { responseMimeType: 'application/json', responseSchema: SUMMARY_SCHEMA, maxOutputTokens: 65536, thinkingConfig: { thinkingBudget: THINK_WRITE } },
       });
-      let value;
-      try {
-        value = JSON.parse(text);
-      } catch {
-        throw new AiError('permanent', '要約の形がちがいます（JSON ではありません）');
-      }
-      return validateSummary(value);
+      return validateSummary(parseJson(text, '要約'));
     },
 
     startAudioUpload: startUpload,

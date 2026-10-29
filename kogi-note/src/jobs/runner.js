@@ -6,7 +6,7 @@ import { MAX_ATTEMPTS, MAX_RATE_LIMITS, rateLimitDelayMs, temporaryDelayMs } fro
 
 const LEASE_MS = 600_000;
 const EXPIRY_MARGIN_MS = 600_000;
-const AUDIO_STEPS = new Set(['wait_file', 'transcribe']);
+const AUDIO_STEPS = new Set(['wait_file', 'attach', 'transcribe']);
 
 async function save(env, id, set, now) {
   const cols = Object.keys(set);
@@ -36,7 +36,7 @@ export async function runOnce(env, { ai, now }) {
     await save(env, lecture.id, fail(step, '処理が途中で止まりました'), now);
     return result;
   }
-  if (AUDIO_STEPS.has(step) && !(lecture.audio_expires_at - now >= EXPIRY_MARGIN_MS)) {
+  if (AUDIO_STEPS.has(step) && lecture.audio_file_name && !(lecture.audio_expires_at - now >= EXPIRY_MARGIN_MS)) {
     await save(env, lecture.id, { status: 'error', waiting_reason: null, lease_count: 0, error_message: '音声の期限が切れました。もう一回入れてね' }, now);
     return result;
   }

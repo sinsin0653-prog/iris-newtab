@@ -7,11 +7,10 @@ const AUDIO_STEPS = new Set(['wait_file', 'transcribe']);
 
 export function needsAudio(row, now) {
   if (row.status === 'uploading') return true;
-  return (
-    row.status === 'error' &&
-    AUDIO_STEPS.has(row.step) &&
-    (row.audio_expires_at == null || row.audio_expires_at - now < EXPIRY_MARGIN_MS)
-  );
+  if (row.status !== 'error') return false;
+  // attach は文字起こしの前にも後にも通る。音声がまだ要るのは前だけ
+  const beforeTranscribe = AUDIO_STEPS.has(row.step) || (row.step === 'attach' && !!row.audio_file_name);
+  return beforeTranscribe && (row.audio_expires_at == null || row.audio_expires_at - now < EXPIRY_MARGIN_MS);
 }
 
 function validDate(s) {
@@ -68,6 +67,8 @@ async function view(env, id, now) {
     segments_done: n,
     transcript: await transcriptOf(env, id),
     summary: row.summary_json ? JSON.parse(row.summary_json) : null,
+    notes: row.notes_json ? { sections: JSON.parse(row.notes_json).sections ?? [] } : null,
+    notes_done: row.notes_json ? JSON.parse(row.notes_json).done ?? 0 : 0,
     error_message: row.error_message,
     needs_audio: needsAudio(row, now),
     attachments,
@@ -152,7 +153,7 @@ export async function retry({ env, params, now }) {
 
 export async function resummarize({ env, params, now }) {
   const row = await loadRow(env, params.id);
-  const allowed = row.status === 'done' || (row.status === 'error' && (row.step === 'attach' || row.step === 'summarize'));
+  const allowed = row.status === 'done' || (row.status === 'error' && !row.audio_file_name && ['attach', 'notes', 'summarize'].includes(row.step));
   if (!allowed) throw new HttpError(409, 'busy', 'いまは要約を作り直せません');
   const { n } = await first(env.DB, 'SELECT count(*) AS n FROM segments WHERE lecture_id = ?', params.id);
   if (row.segments_total == null || n < row.segments_total) throw new HttpError(409, 'not_transcribed', 'まだ文字起こしが終わっていません');
