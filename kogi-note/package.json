@@ -1,0 +1,16 @@
+{
+  "name": "kogi-note",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "e2e": "node e2e/run.cjs",
+    "migrate:local": "wrangler d1 migrations apply kogi_note --local"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.9",
+    "vitest": "~4.1.0",
+    "wrangler": "^4"
+  }
+}

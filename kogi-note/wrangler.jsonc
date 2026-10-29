@@ -1,0 +1,11 @@
+// ID は README の手順で書き換える（いまは仮の値）
+{
+  "name": "kogi-note",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-01",
+  "assets": { "directory": "public", "binding": "ASSETS", "run_worker_first": ["/api/*"] },
+  "d1_databases": [{ "binding": "DB", "database_name": "kogi_note", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "kv_namespaces": [{ "binding": "FILES", "id": "00000000000000000000000000000000" }],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": { "GEMINI_MODEL": "", "GEMINI_BASE_URL": "https://generativelanguage.googleapis.com", "SEGMENT_SEC": "1800", "SEGMENT_INTERVAL_MS": "65000" }
+}

@@ -1,0 +1,4 @@
+node_modules/
+.wrangler/
+e2e/screenshots/
+.dev.vars
